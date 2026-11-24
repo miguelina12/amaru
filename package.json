@@ -1,0 +1,12 @@
+{
+  "name": "amaru",
+  "version": "1.0.0",
+  "description": "Guía por voz para personas ciegas: cámara, pasos y GPS, todo en el teléfono, sin APIs.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "start": "python3 -m http.server 8080"
+  },
+  "license": "MIT"
+}

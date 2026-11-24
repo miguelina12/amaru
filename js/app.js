@@ -1,0 +1,766 @@
+// Amaru — orquestador principal.
+
+import { Voice, Listener } from './voice.js';
+import * as audio from './audio.js';
+import { Pedometer, Compass, Gps } from './sensors.js';
+import { Store } from './store.js';
+import { RouteRecorder, StepGuide, GpsGuide, reverseRoute, describeRoute } from './navigator.js';
+import { Vision } from './vision.js';
+import { Safety } from './safety.js';
+import { parse, findBest, cleanName, hasWake, stripWake, normalize } from './intents.js';
+import { Brain } from './brain.js';
+import * as geo from './geo.js';
+import * as labels from './labels.js';
+
+const $ = (id) => document.getElementById(id);
+
+const store = new Store();
+const S = store.settings;
+const voice = new Voice(S, () => store.save());
+const listener = new Listener('es-ES');
+const ped = new Pedometer();
+const compass = new Compass();
+const gps = new Gps();
+const vision = new Vision($('video'), () => compass.pitch);
+const sonar = new audio.Sonar();
+const brain = new Brain();
+
+const app = {
+  nav: null, // StepGuide | GpsGuide
+  recording: null, // RouteRecorder
+  trail: new RouteRecorder('el punto de partida', null), // migas de pan para "volver"
+  calib: null,
+  finding: null,
+  awaiting: null, // { kind, ... } esperando respuesta del usuario
+  lastRoute: null,
+  here: null, // nombre del último lugar donde está el usuario
+  listening: false,
+  aimBad: false,
+  lastAim: 0,
+};
+
+const stepLength = () => S.stepLength || 0.65;
+
+function say(text, opts) {
+  voice.say(text, opts);
+  log(text);
+}
+
+function log(text) {
+  const el = $('status');
+  if (!el) return;
+  const p = document.createElement('p');
+  p.textContent = text;
+  el.prepend(p);
+  while (el.childElementCount > 6) el.lastElementChild.remove();
+}
+
+const safety = new Safety({
+  say, cue: audio.cue, sonar,
+  walking: () => ped.walking,
+  stepLength,
+  navigating: () => !!app.nav,
+});
+
+// ------------------------------------------------------------------ arranque
+
+$('startBtn').addEventListener('click', start, { once: true });
+
+async function start() {
+  audio.unlock();
+  voice.unlock();
+  $('start').hidden = true;
+  $('app').hidden = false;
+  say('Iniciando Amaru.');
+
+  const [okMotion, okOrient] = await Promise.all([ped.requestPermission(), compass.requestPermission()]);
+  ped.sensitivity = S.sensitivity || 1;
+  ped.start();
+  compass.start();
+  gps.start();
+  keepAwake();
+  if (S.sonar) sonar.start();
+
+  let camOk = true;
+  try {
+    await vision.startCamera();
+  } catch {
+    camOk = false;
+  }
+
+  say('Hola, soy Amaru. Toca la pantalla en cualquier sitio para hablarme, o di ayuda para saber qué puedo hacer.');
+  if (camOk) say('Sostén el teléfono a la altura del pecho, en vertical, con la cámara trasera mirando hacia delante.');
+  else say('No he podido abrir la cámara. Revisa los permisos. Puedo guiarte igualmente con pasos y GPS, pero sin avisos de obstáculos.');
+  if (!okMotion || !okOrient) say('No tengo permiso para los sensores de movimiento; no podré contar tus pasos ni orientarte.');
+  if (!S.calibrated) say('Todavía no conozco la longitud de tus pasos. Cuando quieras, di: calibra mis pasos.');
+  if (!listener.supported) say('Este navegador no permite reconocer la voz. Usa los botones grandes o escribe las órdenes.');
+
+  if (camOk) {
+    vision.start();
+    vision.loadModel()
+      .then(() => say('Detector de obstáculos listo.', { priority: 'low' }))
+      .catch(() => say('No he podido cargar el detector de obstáculos. Conéctate a internet una vez para descargarlo; después funcionará sin conexión.'));
+  }
+  setInterval(aimCoach, 2500);
+  if (S.brain) enableBrain(true);
+  if (S.handsFree) handsFreeLoop();
+}
+
+async function keepAwake() {
+  try {
+    let lock = await navigator.wakeLock?.request('screen');
+    document.addEventListener('visibilitychange', async () => {
+      if (document.visibilityState === 'visible') lock = await navigator.wakeLock?.request('screen');
+    });
+    void lock;
+  } catch {}
+}
+
+// ------------------------------------------------------------------ eventos de sensores
+
+ped.addEventListener('step', () => {
+  const h = compass.heading;
+  app.recording?.addStep(h);
+  app.trail.addStep(h);
+  app.calib?.onStep();
+  app.nav?.onStep();
+  updateInfo();
+});
+
+let lastHeadingEvt = 0;
+compass.addEventListener('change', () => {
+  const now = Date.now();
+  if (now - lastHeadingEvt < 250) return;
+  lastHeadingEvt = now;
+  app.nav?.onHeading?.(compass.heading);
+});
+
+gps.addEventListener('position', (e) => {
+  const p = e.detail;
+  app.recording?.addGps(p);
+  app.trail.addGps(p);
+  app.calib?.onPosition?.(p);
+  if (app.nav?.kind === 'gps') app.nav.onPosition(p);
+  updateInfo();
+});
+
+vision.addEventListener('detections', (e) => {
+  const { objects, W, H } = e.detail;
+  safety.onDetections(objects);
+  if (app.finding) onFinding(objects);
+  drawOverlay(objects, W, H);
+});
+
+vision.addEventListener('quality', (e) => safety.onQuality(e.detail));
+
+// ------------------------------------------------------------------ "enfócame": colocación de la cámara
+
+function aimProblem() {
+  const b = compass.pitch, g = compass.roll, q = vision.quality;
+  if (!vision.stream) return null;
+  if (q?.covered) return 'Parece que la cámara está tapada. Revisa que tus dedos o la funda no la cubran.';
+  if (b != null) {
+    if (b < 55) return 'Levanta un poco el teléfono. La cámara debe mirar hacia delante, no al suelo.';
+    if (b > 115) return 'Baja un poco el teléfono, la cámara está mirando al techo.';
+  }
+  if (g != null && Math.abs(g) > 30) return `Endereza el teléfono, está inclinado hacia la ${g > 0 ? 'derecha' : 'izquierda'}.`;
+  if (q?.dark) return 'dark';
+  if (q?.blurry && !ped.walking) return 'La imagen está borrosa. Limpia la lente o sujeta el teléfono más quieto.';
+  return null;
+}
+
+async function aimCoach() {
+  const p = aimProblem();
+  const now = Date.now();
+  if (p === 'dark') {
+    if (!vision.torchOn && (await vision.torch(true))) say('Hay poca luz. He encendido la linterna.', { priority: 'low' });
+    else if (!vision.torchOn && now - app.lastAim > 20000) {
+      app.lastAim = now;
+      say('Hay muy poca luz y no veo bien los obstáculos. Ve con más cuidado.', { priority: 'low' });
+    }
+    return;
+  }
+  if (p) {
+    if (now - app.lastAim > (app.aimBad ? 9000 : 4000)) {
+      app.lastAim = now;
+      app.aimBad = true;
+      say(p, { priority: 'low', remember: false });
+    }
+  } else if (app.aimBad) {
+    app.aimBad = false;
+    audio.cue.ok();
+    say('Así, bien colocado.', { priority: 'low', remember: false });
+  }
+}
+
+// ------------------------------------------------------------------ escucha
+
+$('talk').addEventListener('click', () => listenOnce());
+$('btnWhat').addEventListener('click', () => handle('qué hay delante'));
+$('btnWhere').addEventListener('click', () => handle('dónde estoy'));
+$('btnStop').addEventListener('click', () => handle('para'));
+$('btnHelp').addEventListener('click', () => handle('ayuda'));
+$('typeForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const v = $('typeIn').value.trim();
+  $('typeIn').value = '';
+  if (v) handle(v);
+});
+
+async function listenOnce() {
+  if (!listener.supported) return say('No puedo escuchar en este navegador. Usa los botones o escribe.');
+  if (app.listening) return;
+  voice.stop();
+  if (!app.localChecked) { app.localChecked = true; await listener.prepareLocal(); }
+  app.listening = true;
+  $('talk').classList.add('on');
+  $('talk').textContent = 'Te escucho…';
+  audio.cue.listen();
+  try {
+    const text = await listener.listen();
+    audio.cue.heard();
+    if (text) await handle(text);
+    else say('No te he oído. Toca otra vez y habla.', { remember: false });
+  } catch (e) {
+    if (String(e.message).includes('not-allowed')) say('Necesito permiso para usar el micrófono.');
+    else say('No he podido escuchar. Inténtalo otra vez.');
+  } finally {
+    app.listening = false;
+    $('talk').classList.remove('on');
+    $('talk').textContent = 'Toca para hablar';
+  }
+}
+
+async function handsFreeLoop() {
+  if (!listener.supported) return;
+  while (S.handsFree) {
+    await voice.idle();
+    if (app.listening) { await sleep(300); continue; }
+    app.listening = true;
+    let text = null;
+    try { text = await listener.listen({ timeoutMs: 12000 }); } catch { await sleep(1500); }
+    app.listening = false;
+    if (text && hasWake(text)) {
+      audio.cue.heard();
+      const rest = stripWake(normalize(text));
+      if (rest) await handle(rest);
+      else await listenOnce();
+    }
+  }
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ------------------------------------------------------------------ cerebro: interpretar órdenes
+
+function brainState() {
+  return {
+    lugares: store.placeNames(),
+    rutas: store.routeNames(),
+    delante: (vision.last || []).slice(0, 6).map((o) => ({ objeto: labels.name(o.cls), hora: o.clock, metros: o.dist && +o.dist.toFixed(1) })),
+    navegando: app.nav ? app.nav.route?.name || app.nav.name : null,
+    grabando: app.recording?.name || null,
+    rumbo: compass.heading != null ? geo.cardinal(compass.heading) : null,
+    gps: gps.last ? Math.round(gps.last.acc) + ' m de precisión' : 'sin señal',
+    pasos: ped.count,
+  };
+}
+
+async function handle(raw) {
+  log('» ' + raw);
+  let cmd = parse(raw);
+
+  if (app.awaiting && !['stop', 'help', 'repeat'].includes(cmd.intent)) {
+    const a = app.awaiting;
+    app.awaiting = null;
+    return a.resolve(cmd, raw);
+  }
+
+  if (cmd.intent === 'unknown' && brain.ready) {
+    say('Déjame pensar.', { priority: 'low', remember: false });
+    try {
+      const r = await brain.interpret(raw, brainState());
+      if (r) {
+        if (r.say) say(r.say);
+        if (r.intent === 'none') return;
+        if (['navigate', 'find', 'where_is', 'save_place'].includes(r.intent) && !r.name) return;
+        cmd = { ...r, name: r.name && cleanName(r.name), text: normalize(raw) };
+      }
+    } catch {}
+  }
+  return run(cmd);
+}
+
+async function run(cmd) {
+  const H = handlers[cmd.intent] || handlers.unknown;
+  return H(cmd);
+}
+
+const handlers = {
+  empty() {},
+
+  unknown() {
+    say(brain.ready
+      ? 'No estoy seguro de lo que necesitas. Dímelo de otra forma.'
+      : 'No te he entendido. Prueba, por ejemplo: llévame a la cocina, qué hay delante, o di ayuda.');
+  },
+
+  help() {
+    say('Puedo avisarte de obstáculos con la cámara, decirte qué hay delante y buscar objetos. ' +
+      'Para tu casa: di "graba ruta a la cocina", camina, y al llegar di "he llegado". Después di "llévame a la cocina". ' +
+      'En la calle: di "guarda este lugar como portal" y luego "llévame al portal". ' +
+      'También: dónde estoy, hacia dónde miro, calibra mis pasos, vuelve, activa el sónar, y para.');
+  },
+
+  repeat() { if (voice.last) voice.say(voice.last); },
+  greet() { say('Hola. Estoy aquí. ¿A dónde vamos?'); },
+  thanks() { say('De nada. Aquí sigo.'); },
+  yes() { say('Vale.'); },
+  no() { say('De acuerdo.'); },
+
+  stop() {
+    voice.stop();
+    const had = [];
+    if (app.nav) { had.push('la guía'); app.nav = null; }
+    if (app.finding) { had.push('la búsqueda'); app.finding = null; }
+    if (app.calib) { had.push('la calibración'); app.calib = null; }
+    if (had.length) say(`He parado ${had.join(' y ')}.`, { priority: 'urgent' });
+    else if (app.recording) say('Sigo grabando la ruta. Di "he llegado" para guardarla o "cancela la grabación".', { priority: 'urgent' });
+    else say('Vale, en silencio. Sigo vigilando obstáculos.', { priority: 'urgent' });
+  },
+
+  // ---------- rutas
+
+  record_route(cmd) {
+    if (!cmd.name) {
+      say('¿Cómo se llama el sitio al que vamos?');
+      app.awaiting = { resolve: (c, raw) => handlers.record_route({ name: cleanName(c.name || raw) }) };
+      return;
+    }
+    if (app.nav) app.nav = null;
+    app.recording = new RouteRecorder(cmd.name, app.here);
+    audio.cue.ok();
+    say(`Grabando el camino hasta ${cmd.name}${app.here ? ' desde ' + app.here : ''}. ` +
+      'Camina con normalidad, con el teléfono delante. Cuando llegues, di "he llegado".');
+  },
+
+  cancel_record() {
+    if (!app.recording) return say('No estaba grabando ninguna ruta.');
+    app.recording = null;
+    say('Grabación cancelada.');
+  },
+
+  finish() {
+    if (app.calib?.finish) return app.calib.finish();
+    if (app.recording) {
+      const r = app.recording.finish(stepLength(), gps.good(25));
+      app.recording = null;
+      if (!r.segments.length && r.track.length < 2) return say('No he detectado pasos, así que no he guardado la ruta. Prueba otra vez caminando con el teléfono en la mano.');
+      store.saveRoute(r);
+      const g = gps.good(25);
+      if (g && !store.place(r.name)) store.savePlace({ name: r.name, lat: g.lat, lon: g.lon, acc: g.acc });
+      arrivedAt(r.name);
+      audio.cue.arrive();
+      return say(`Ruta a ${r.name} guardada: ${describeRoute(r, stepLength())}. Cuando quieras volver aquí, di "llévame a ${r.name}".`);
+    }
+    if (app.nav) {
+      const n = app.nav.route?.name || app.nav.name;
+      app.nav = null;
+      arrivedAt(n);
+      return say(`Perfecto, estás en ${n}.`);
+    }
+    say('No estaba grabando ninguna ruta.');
+  },
+
+  navigate(cmd) {
+    const routes = store.routeNames(), places = store.placeNames();
+    const name = findBest(cmd.name, [...new Set([...routes, ...places])]);
+    if (!name) {
+      const known = [...new Set([...routes, ...places])];
+      return say(known.length
+        ? `No conozco ${cmd.name}. Conozco: ${known.slice(0, 8).join(', ')}.`
+        : `Todavía no conozco ${cmd.name}. Primero graba la ruta: di "graba ruta a ${cmd.name}" y camina hasta allí.`);
+    }
+    app.finding = null;
+    const route = store.route(name);
+    const place = store.place(name);
+    const gpsOk = gps.good(25);
+    if (route && route.track?.length >= 2 && gpsOk) {
+      startNav(new GpsGuide(name, route.track, navCtx()));
+      app.lastRoute = route;
+    } else if (place?.lat != null && gpsOk && (!route || geo.haversine(gpsOk, place) > 40)) {
+      startNav(new GpsGuide(name, [place], navCtx()));
+    } else if (route) {
+      if (route.origin && app.here && normalize(route.origin) !== normalize(app.here)) {
+        say(`Ojo: esta ruta empieza en ${route.origin}, y creo que estás en ${app.here}.`);
+      }
+      startNav(new StepGuide(route, navCtx()));
+      app.lastRoute = route;
+    } else if (place?.lat != null) {
+      startNav(new GpsGuide(name, [place], navCtx()));
+    } else {
+      say(`Sé que existe ${name}, pero no tengo un camino. Graba una ruta diciendo "graba ruta a ${name}".`);
+    }
+  },
+
+  go_back() {
+    if (app.lastRoute) {
+      const back = reverseRoute(app.lastRoute);
+      say(`Te llevo de vuelta a ${back.name}.`);
+      startNav(back.track.length >= 2 && gps.good(25) ? new GpsGuide(back.name, back.track, navCtx()) : new StepGuide(back, navCtx()));
+      app.lastRoute = null;
+      return;
+    }
+    const t = app.trail.finish(stepLength(), gps.good(25));
+    if (t.totalSteps < 3) return say('No tengo un camino reciente para deshacer.');
+    const back = reverseRoute(t, app.here || 'el punto de partida');
+    startNav(back.track.length >= 2 && gps.good(25) ? new GpsGuide(back.name, back.track, navCtx()) : new StepGuide(back, navCtx()));
+  },
+
+  progress() {
+    if (app.nav) say(app.nav.progress());
+    else say('Ahora mismo no te estoy guiando a ningún sitio.');
+  },
+
+  // ---------- lugares
+
+  save_place(cmd) {
+    const name = cmd.name;
+    const g = gps.good(30);
+    store.savePlace(g ? { name, lat: g.lat, lon: g.lon, acc: g.acc } : { name, indoor: true });
+    arrivedAt(name);
+    audio.cue.ok();
+    if (g) say(`Guardado ${name}, con una precisión de ${Math.round(g.acc)} metros.`);
+    else say(`He anotado que estás en ${name}. Como no hay buena señal GPS, para volver aquí graba una ruta: desde otro sitio di "graba ruta a ${name}" y camina hasta aquí.`);
+  },
+
+  set_origin(cmd) {
+    const n = findBest(cmd.name, store.placeNames()) || cmd.name;
+    arrivedAt(n);
+    say(`Entendido, estás en ${n}.`);
+  },
+
+  delete(cmd) {
+    const name = findBest(cmd.name, [...store.placeNames(), ...store.routeNames()]);
+    if (!name) return say(`No encuentro ${cmd.name}.`);
+    say(`¿Seguro que quieres borrar ${name}? Di sí o no.`);
+    app.awaiting = {
+      resolve: (c) => {
+        if (c.intent === 'yes') { store.remove(name); say(`${labels.cap(name)} borrado.`); }
+        else say('No he borrado nada.');
+      },
+    };
+  },
+
+  list() {
+    const p = store.placeNames(), r = store.routeNames();
+    if (!p.length && !r.length) return say('Todavía no he aprendido ningún lugar.');
+    let msg = '';
+    if (r.length) msg += `Rutas: ${r.join(', ')}. `;
+    const onlyPlaces = p.filter((x) => !r.includes(x));
+    if (onlyPlaces.length) msg += `Lugares: ${onlyPlaces.join(', ')}.`;
+    say(msg);
+  },
+
+  where() {
+    const p = gps.last;
+    const parts = [];
+    if (app.here) parts.push(`Lo último que sé es que estabas en ${app.here}.`);
+    if (!p || Date.now() - p.t > 30000) {
+      parts.push('No tengo señal GPS. Probablemente estás en interior.');
+    } else {
+      const known = store.placeNames().map((n) => store.place(n)).filter((x) => x.lat != null);
+      if (known.length) {
+        known.sort((a, b) => geo.haversine(p, a) - geo.haversine(p, b));
+        const n = known[0];
+        const d = geo.haversine(p, n);
+        const rel = compass.heading != null ? geo.angleDiff(geo.bearing(p, n), compass.heading) : null;
+        parts.push(d < 15 ? `Estás en ${n.name}.` : `Estás a ${geo.distancePhrase(d, stepLength())} de ${n.name}${rel != null ? ', ' + geo.clockPhrase(rel) : ''}.`);
+      } else {
+        parts.push(`Tengo tu posición, con ${Math.round(p.acc)} metros de precisión. Sin servicios externos no sé el nombre de la calle; guarda lugares y te oriento respecto a ellos.`);
+      }
+      if (p.acc > 30) parts.push('La señal es débil.');
+    }
+    if (compass.heading != null) parts.push(`Miras hacia el ${geo.cardinal(compass.heading)}.`);
+    say(parts.join(' '));
+  },
+
+  where_is(cmd) {
+    const name = findBest(cmd.name, [...store.placeNames(), ...store.routeNames()]);
+    if (!name) {
+      const cls = labels.classFromSpanish(cmd.name);
+      if (cls) return handlers.find({ name: cmd.name });
+      return say(`No conozco ${cmd.name}.`);
+    }
+    const pl = store.place(name), p = gps.good(40);
+    if (pl?.lat != null && p) {
+      const d = geo.haversine(p, pl);
+      const rel = compass.heading != null ? geo.angleDiff(geo.bearing(p, pl), compass.heading) : null;
+      return say(`${labels.cap(name)} está a ${geo.distancePhrase(d, stepLength())}${rel != null ? ', ' + geo.clockPhrase(rel) : ''}.`);
+    }
+    const r = store.route(name);
+    if (r) return say(`Tengo la ruta a ${name}: ${describeRoute(r, stepLength())}${r.origin ? ', desde ' + r.origin : ''}.`);
+    say(`No sé a qué distancia está ${name} ahora mismo.`);
+  },
+
+  heading() {
+    if (compass.heading == null) return say('No tengo brújula en este momento. Mueve el teléfono en forma de ocho para calibrarla.');
+    say(`Miras hacia el ${geo.cardinal(compass.heading)}.`);
+  },
+
+  // ---------- visión
+
+  async describe() {
+    if (!vision.stream) return say('La cámara está apagada.');
+    if (!vision.model) return say('El detector todavía se está cargando.');
+    const objs = Date.now() - vision.lastAt < 1500 ? vision.last : await vision.detectNow();
+    const q = vision.quality;
+    if (!objs.length) {
+      let m = 'No reconozco objetos delante.';
+      if (q?.dark) m += ' Hay poca luz.';
+      else if (q && q.centerStd < 11) m += ' Puede que tengas una pared o superficie lisa enfrente.';
+      return say(m);
+    }
+    const sorted = [...objs].sort((a, b) => (a.dist ?? 99) - (b.dist ?? 99)).slice(0, 5);
+    const parts = sorted.map((o) => {
+      const where = o.clock === 12 ? 'delante' : `a las ${o.clock}`;
+      const d = o.dist != null ? `, a ${geo.distancePhrase(o.dist, stepLength())}` : '';
+      return `${labels.indef(o.cls)} ${where}${d}`;
+    });
+    say('Veo ' + joinY(parts) + '.');
+  },
+
+  find(cmd) {
+    const cls = labels.classFromSpanish(cmd.name);
+    if (!cls) {
+      return say(`Todavía no sé reconocer ${cmd.name}. Reconozco personas, sillas, mesas, sofás, camas, plantas, nevera, inodoro, coches, bicicletas, perros, bancos, semáforos y otros objetos comunes.`);
+    }
+    if (!vision.model) return say('El detector todavía se está cargando.');
+    app.finding = { cls, started: Date.now(), lastSay: 0, lastSeen: 0 };
+    say(`Buscando ${labels.indef(cls)}. Gira despacio sobre ti mismo con el teléfono delante.`);
+  },
+
+  // ---------- pasos
+
+  calibrate(cmd) {
+    if (cmd.meters) return calibrateKnown(cmd.meters);
+    const g = gps.good(12);
+    if (g) return calibrateGps();
+    say('Para medir tus pasos puedo usar: tu altura, por ejemplo di "mido uno setenta"; ' +
+      'o una distancia conocida, di "calibra con diez metros" y camina esa distancia. ' +
+      'En la calle, con buena señal GPS, también puedo calibrar solo.');
+  },
+
+  calibrate_height(cmd) {
+    const sl = +(cmd.cm * 0.414 / 100).toFixed(2);
+    S.heightCm = cmd.cm;
+    S.stepLength = sl;
+    S.calibrated = true;
+    store.save();
+    say(`Perfecto. Con ${cmd.cm} centímetros, tu paso mide unos ${Math.round(sl * 100)} centímetros. Para más precisión, calibra caminando una distancia conocida.`);
+  },
+
+  steps() {
+    say(`Llevas ${ped.count} pasos, unos ${Math.round(ped.count * stepLength())} metros. Tu paso mide ${Math.round(stepLength() * 100)} centímetros${S.calibrated ? '' : ', aunque aún no está calibrado'}.`);
+  },
+
+  reset_steps() { ped.count = 0; say('Contador de pasos a cero.'); },
+
+  // ---------- ajustes y utilidades
+
+  time() {
+    const d = new Date();
+    say(`Son las ${d.getHours()} y ${d.getMinutes() === 0 ? 'en punto' : d.getMinutes()}.`);
+  },
+  date() {
+    say('Hoy es ' + new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' }) + '.');
+  },
+  async battery() {
+    try {
+      const b = await navigator.getBattery();
+      say(`Batería al ${Math.round(b.level * 100)} por ciento${b.charging ? ', cargando' : ''}.`);
+    } catch { say('No puedo leer la batería en este teléfono.'); }
+  },
+  async torch_on() { say((await vision.torch(true)) ? 'Linterna encendida.' : 'No puedo encender la linterna en este teléfono.'); },
+  async torch_off() { await vision.torch(false); say('Linterna apagada.'); },
+  sonar_on() { S.sonar = true; store.save(); sonar.start(); say('Sónar activado: cuanto más rápido pite, más cerca está el obstáculo. El sonido a un lado indica de qué lado está.'); },
+  sonar_off() { S.sonar = false; store.save(); sonar.stop(); say('Sónar desactivado.'); },
+  camera_on() {
+    (vision.stream ? Promise.resolve() : vision.startCamera())
+      .then(() => { vision.start(); safety.enabled = true; say('Vigilancia de obstáculos activada.'); })
+      .catch(() => say('No puedo abrir la cámara.'));
+  },
+  camera_off() { safety.enabled = false; vision.stopCamera(); sonar.update(0); say('Cámara apagada. Ya no te aviso de obstáculos; ve con cuidado.'); },
+  aim() { const p = aimProblem(); say(!p ? 'La cámara está bien colocada.' : p === 'dark' ? 'Hay poca luz.' : p); },
+  faster() { S.rate = Math.min(2, +(S.rate + 0.15).toFixed(2)); store.save(); say('Así hablo más rápido.'); },
+  slower() { S.rate = Math.max(0.6, +(S.rate - 0.15).toFixed(2)); store.save(); say('Así hablo más despacio.'); },
+  next_voice() { const n = voice.nextVoice(); say(n ? `Ahora hablo con la voz ${n}. ¿Te gusta?` : 'Solo tengo una voz en español en este teléfono.'); },
+  brain_on() { enableBrain(); },
+  brain_off() { S.brain = false; store.save(); say('Modo inteligente desactivado para la próxima vez.'); },
+  handsfree_on() {
+    S.handsFree = true; store.save();
+    say('Manos libres activado. Empieza tus órdenes diciendo "Amaru", por ejemplo: Amaru, qué hay delante.');
+    handsFreeLoop();
+  },
+  handsfree_off() { S.handsFree = false; store.save(); listener.abort(); say('Manos libres desactivado. Toca la pantalla para hablarme.'); },
+};
+
+function joinY(parts) {
+  return parts.length < 2 ? parts.join('') : parts.slice(0, -1).join(', ') + ' y ' + parts[parts.length - 1];
+}
+
+// ------------------------------------------------------------------ navegación
+
+function navCtx() {
+  return {
+    say, cue: audio.cue,
+    heading: () => compass.heading,
+    stepLength,
+    position: () => gps.good(40),
+    onArrive: (name) => { app.nav = null; arrivedAt(name); },
+  };
+}
+
+function startNav(guide) {
+  app.nav = guide;
+  guide.start();
+}
+
+function arrivedAt(name) {
+  app.here = name;
+  app.trail = new RouteRecorder(name, null);
+}
+
+// ------------------------------------------------------------------ búsqueda de objetos
+
+function onFinding(objects) {
+  const f = app.finding;
+  const now = Date.now();
+  if (now - f.started > 90000) {
+    app.finding = null;
+    return say(`No he encontrado ${labels.indef(f.cls)}. Dejo de buscar.`);
+  }
+  const hits = objects.filter((o) => o.cls === f.cls).sort((a, b) => (a.dist ?? 99) - (b.dist ?? 99));
+  if (!hits.length) {
+    if (now - Math.max(f.lastSeen, f.started) > 8000 && now - f.lastSay > 8000) {
+      f.lastSay = now;
+      say('Aún no lo veo. Sigue girando despacio.', { priority: 'low' });
+    }
+    return;
+  }
+  const o = hits[0];
+  f.lastSeen = now;
+  if (o.dist != null && o.dist < 0.9 && o.clock === 12) {
+    app.finding = null;
+    audio.cue.arrive();
+    return say(`${labels.cap(labels.def(o.cls))} está justo delante de ti, al alcance de la mano.`, { priority: 'urgent' });
+  }
+  if (now - f.lastSay < 3500) return;
+  f.lastSay = now;
+  audio.cue.turn(Math.max(-1, Math.min(1, o.angle / 30)));
+  const where = o.clock === 12 ? 'justo delante' : `a las ${o.clock}`;
+  const d = o.dist != null ? `, a ${geo.distancePhrase(o.dist, stepLength())}` : '';
+  say(`${labels.cap(labels.def(o.cls))} está ${where}${d}.`, { priority: 'low' });
+}
+
+// ------------------------------------------------------------------ calibración de pasos
+
+function finishCalib(meters, steps) {
+  app.calib = null;
+  if (steps < 6) return say('He contado muy pocos pasos. Repite la calibración caminando a tu ritmo normal.');
+  const sl = meters / steps;
+  if (sl < 0.3 || sl > 1.1) return say(`Me sale un paso de ${Math.round(sl * 100)} centímetros, que no parece correcto. Repitamos la calibración.`);
+  S.stepLength = +sl.toFixed(3);
+  S.calibrated = true;
+  store.save();
+  audio.cue.ok();
+  say(`Calibrado. Has dado ${steps} pasos en ${Math.round(meters)} metros: tu paso mide ${Math.round(sl * 100)} centímetros.`);
+}
+
+function calibrateKnown(meters) {
+  const c = { steps: 0, onStep() { c.steps++; }, finish: () => finishCalib(meters, c.steps) };
+  app.calib = c;
+  say(`De acuerdo. Camina en línea recta ${meters} metros a tu ritmo normal. Cuando llegues, di "he llegado".`);
+}
+
+function calibrateGps() {
+  const TARGET = 50;
+  const c = {
+    steps: 0, start: null, samples: [],
+    onPosition(p) {
+      if (p.acc > 12) return;
+      if (!c.start) { c.samples.push(p); if (c.samples.length >= 3) { c.start = avg(c.samples); say('Ya. Empieza a caminar recto.'); } }
+    },
+    onStep() {
+      if (!c.start) return;
+      c.steps++;
+      if (c.steps === TARGET) {
+        const end = gps.good(12);
+        if (!end) { app.calib = null; return say('He perdido la señal GPS. Prueba con "calibra con diez metros".'); }
+        finishCalib(geo.haversine(c.start, end), c.steps);
+      }
+    },
+  };
+  app.calib = c;
+  say(`Calibración con GPS. Quédate quieto unos segundos en un sitio abierto, y cuando te avise camina recto unos ${TARGET} pasos por un camino seguro.`);
+}
+
+function avg(ps) {
+  return { lat: ps.reduce((a, p) => a + p.lat, 0) / ps.length, lon: ps.reduce((a, p) => a + p.lon, 0) / ps.length };
+}
+
+// ------------------------------------------------------------------ modo inteligente
+
+async function enableBrain(silent = false) {
+  if (!Brain.supported) return say('Este teléfono no admite el modo inteligente, porque su navegador no tiene WebGPU. Sigo entendiendo las órdenes normales.');
+  if (brain.ready) return say('El modo inteligente ya está activo.');
+  if (!silent) say('Activando el modo inteligente. La primera vez descargo un modelo de alrededor de un giga, que después funciona sin conexión y sin enviar nada fuera del teléfono. Te aviso cuando esté listo.');
+  let lastPct = -1;
+  try {
+    await brain.load((pr) => {
+      const pct = Math.floor(pr * 4) * 25;
+      if (pct > lastPct && pct > 0 && pct < 100) { lastPct = pct; say(`Modo inteligente al ${pct} por ciento.`, { priority: 'low', remember: false }); }
+    });
+    S.brain = true;
+    store.save();
+    say('Modo inteligente listo. Ahora puedes hablarme con más libertad.');
+  } catch {
+    say('No he podido cargar el modo inteligente. Necesito conexión la primera vez y bastante memoria libre.');
+  }
+}
+
+// ------------------------------------------------------------------ pantalla (para acompañantes)
+
+function updateInfo() {
+  const el = $('info');
+  if (!el) return;
+  const p = gps.last;
+  el.textContent =
+    `Pasos ${ped.count} · paso ${Math.round(stepLength() * 100)} cm${S.calibrated ? '' : ' (sin calibrar)'}` +
+    (compass.heading != null ? ` · rumbo ${Math.round(compass.heading)}° ${geo.cardinal(compass.heading)}` : '') +
+    (p ? ` · GPS ±${Math.round(p.acc)} m` : ' · sin GPS') +
+    (app.recording ? ` · grabando "${app.recording.name}"` : '') +
+    (app.nav ? ` · guiando a "${app.nav.route?.name || app.nav.name}"` : '');
+}
+
+function drawOverlay(objects, W, H) {
+  const c = $('overlay');
+  if (!c || !W) return;
+  if (c.width !== W) { c.width = W; c.height = H; }
+  const g = c.getContext('2d');
+  g.clearRect(0, 0, W, H);
+  g.lineWidth = 4;
+  g.font = 'bold 22px system-ui';
+  for (const o of objects) {
+    const [x, y, w, h] = o.bbox;
+    g.strokeStyle = o.inPath && o.obstacle ? '#ff3b30' : '#ffd60a';
+    g.strokeRect(x, y, w, h);
+    g.fillStyle = g.strokeStyle;
+    g.fillText(`${labels.name(o.cls)}${o.dist != null ? ' ' + o.dist.toFixed(1) + 'm' : ''}`, x + 4, Math.max(22, y - 6));
+  }
+}
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+
+// para depurar desde la consola
+window.amaru = { handle, app, store, vision, ped, compass, gps };

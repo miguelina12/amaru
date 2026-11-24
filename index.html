@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Amaru · Guía por voz</title>
+  <meta name="description" content="Guía por voz para personas ciegas: cámara, pasos y GPS, todo en el teléfono.">
+  <meta name="theme-color" content="#000000">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon.svg">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <main id="start" class="screen">
+    <h1>Amaru</h1>
+    <p>Tu guía por voz. Usa la cámara, tus pasos y el GPS. Todo funciona dentro del teléfono.</p>
+    <button id="startBtn" class="huge">Toca para empezar</button>
+    <p class="note">Amaru es una ayuda. No sustituye al bastón ni al perro guía.</p>
+  </main>
+
+  <main id="app" class="screen" hidden>
+    <div id="camwrap" aria-hidden="true">
+      <video id="video" playsinline muted autoplay></video>
+      <canvas id="overlay"></canvas>
+    </div>
+
+    <button id="talk" class="talk" aria-label="Hablar con Amaru. Toca y di lo que necesitas.">Toca para hablar</button>
+
+    <div class="row">
+      <button id="btnWhat">¿Qué hay delante?</button>
+      <button id="btnWhere">¿Dónde estoy?</button>
+    </div>
+    <div class="row">
+      <button id="btnStop" class="stop">Parar</button>
+      <button id="btnHelp">Ayuda</button>
+    </div>
+
+    <form id="typeForm" class="type">
+      <label for="typeIn">Escribir una orden</label>
+      <div class="row">
+        <input id="typeIn" autocomplete="off" enterkeyhint="send" placeholder="llévame a la cocina">
+        <button type="submit">Enviar</button>
+      </div>
+    </form>
+
+    <div id="info" aria-hidden="true"></div>
+    <div id="status" aria-live="off"></div>
+  </main>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
