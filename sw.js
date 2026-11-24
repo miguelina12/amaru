@@ -1,5 +1,5 @@
 // Service worker: guarda la app y el detector en el teléfono para que funcione sin conexión.
-const VERSION = 'amaru-v1';
+const VERSION = 'faro-v1';
 const SHELL = [
   './', 'index.html', 'css/styles.css', 'manifest.webmanifest', 'icons/icon.svg',
   'js/app.js', 'js/voice.js', 'js/audio.js', 'js/sensors.js', 'js/store.js', 'js/navigator.js',
@@ -13,7 +13,7 @@ self.addEventListener('install', (e) => {
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k.startsWith('amaru-') && k !== VERSION).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k.startsWith('faro-') && k !== VERSION).map((k) => caches.delete(k))))
       .then(() => self.clients.claim()),
   );
 });

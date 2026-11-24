@@ -1,6 +1,6 @@
 {
-  "name": "Amaru · Guía por voz",
-  "short_name": "Amaru",
+  "name": "Faro · Guía por voz",
+  "short_name": "Faro",
   "description": "Guía por voz para personas ciegas con cámara, pasos y GPS, sin servicios externos.",
   "lang": "es",
   "start_url": "./",

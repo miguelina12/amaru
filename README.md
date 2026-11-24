@@ -1,6 +1,6 @@
-# Amaru · guía por voz para personas ciegas
+# Faro · guía por voz para personas ciegas
 
-Amaru es una app web instalable (PWA) que te guía por casa y por la calle usando
+Faro es una app web instalable (PWA) que te guía por casa y por la calle usando
 **la cámara, el GPS, la brújula y el contador de pasos del teléfono**. Te habla con
 la mejor voz en español que tenga tu móvil y entiende órdenes dichas con naturalidad.
 
@@ -18,14 +18,14 @@ servidor. Todo se calcula dentro del teléfono:
 | Calle | GPS, rumbo y distancia en línea recta, puntos de ruta grabados |
 | Comprensión | Analizador de órdenes en español (+ modo inteligente opcional con un LLM local) |
 
-> ⚠️ **Amaru es una ayuda, no un sustituto del bastón o del perro guía.** La cámara no ve
+> ⚠️ **Faro es una ayuda, no un sustituto del bastón o del perro guía.** La cámara no ve
 > escalones, bordillos, agujeros, cristales ni objetos fuera de su encuadre.
 
 ## Cómo se usa
 
 1. Abre la app y toca **"Toca para empezar"** (acepta cámara, ubicación y movimiento).
 2. Sujeta el teléfono **a la altura del pecho, en vertical, con la cámara trasera hacia delante**.
-   Amaru te avisa si lo llevas inclinado, tapado, borroso o con poca luz (y enciende la linterna).
+   Faro te avisa si lo llevas inclinado, tapado, borroso o con poca luz (y enciende la linterna).
 3. **Toca cualquier parte grande de la pantalla** y habla.
 
 ### Ejemplos de órdenes
@@ -36,11 +36,11 @@ servidor. Todo se calcula dentro del teléfono:
 - **Pasos:** "calibra mis pasos", "calibra con diez metros", "mido uno setenta", "¿cuántos pasos llevo?"
 - **Orientación:** "¿dónde estoy?", "¿hacia dónde miro?", "¿cuánto falta?"
 - **Ajustes:** "habla más despacio", "cambia de voz", "activa el sónar", "activa manos libres"
-  (entonces empieza las frases con "Amaru…"), "activa el modo inteligente", "para", "repite", "ayuda".
+  (entonces empieza las frases con "Faro…"), "activa el modo inteligente", "para", "repite", "ayuda".
 
 ### Evitar choques
 
-Mientras caminas, Amaru vigila un "pasillo" de unos 90 cm delante de ti:
+Mientras caminas, Faro vigila un "pasillo" de unos 90 cm delante de ti:
 
 - **Aviso:** "Silla delante, a 3 pasos. Desvíate a la izquierda." (pitido en el lado del obstáculo)
 - **Alto:** "¡Alto! Persona justo delante." con vibración fuerte, también si algo se te acerca rápido.

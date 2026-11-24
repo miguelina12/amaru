@@ -10,13 +10,15 @@ import { Store } from '../js/store.js';
 const P = (t) => parse(t);
 
 test('órdenes de navegación', () => {
+  assert.equal(P('Faro, qué hay delante').intent, 'describe');
+  assert.equal(P('oye faro llévame a la cocina').name, 'cocina');
   assert.deepEqual([P('Llévame a la cocina').intent, P('Llévame a la cocina').name], ['navigate', 'cocina']);
   assert.equal(P('guíame hasta el baño por favor').name, 'baño');
   assert.equal(P('Llévame al salón').name, 'salón');
   assert.equal(P('quiero ir a casa de mi madre').name, 'casa de mi madre');
   assert.equal(P('vuelve a la entrada').intent, 'navigate');
   assert.equal(P('vuelve').intent, 'go_back');
-  assert.equal(P('Amaru, llévame al portal').name, 'portal');
+  assert.equal(P('Faro, llévame al portal').name, 'portal');
 });
 
 test('grabar rutas y lugares', () => {

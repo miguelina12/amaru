@@ -1,6 +1,6 @@
 // Memoria local del teléfono: ajustes, lugares y rutas. Nada sale del dispositivo.
 
-const KEY = 'amaru.v1';
+const KEY = 'faro.v1';
 
 const DEFAULTS = {
   settings: {

@@ -1,4 +1,4 @@
-// Amaru — orquestador principal.
+// Faro — orquestador principal.
 
 import { Voice, Listener } from './voice.js';
 import * as audio from './audio.js';
@@ -71,7 +71,7 @@ async function start() {
   voice.unlock();
   $('start').hidden = true;
   $('app').hidden = false;
-  say('Iniciando Amaru.');
+  say('Iniciando Faro.');
 
   const [okMotion, okOrient] = await Promise.all([ped.requestPermission(), compass.requestPermission()]);
   ped.sensitivity = S.sensitivity || 1;
@@ -88,7 +88,7 @@ async function start() {
     camOk = false;
   }
 
-  say('Hola, soy Amaru. Toca la pantalla en cualquier sitio para hablarme, o di ayuda para saber qué puedo hacer.');
+  say('Hola, soy Faro. Toca la pantalla en cualquier sitio para hablarme, o di ayuda para saber qué puedo hacer.');
   if (camOk) say('Sostén el teléfono a la altura del pecho, en vertical, con la cámara trasera mirando hacia delante.');
   else say('No he podido abrir la cámara. Revisa los permisos. Puedo guiarte igualmente con pasos y GPS, pero sin avisos de obstáculos.');
   if (!okMotion || !okOrient) say('No tengo permiso para los sensores de movimiento; no podré contar tus pasos ni orientarte.');
@@ -599,7 +599,7 @@ const handlers = {
   brain_off() { S.brain = false; store.save(); say('Modo inteligente desactivado para la próxima vez.'); },
   handsfree_on() {
     S.handsFree = true; store.save();
-    say('Manos libres activado. Empieza tus órdenes diciendo "Amaru", por ejemplo: Amaru, qué hay delante.');
+    say('Manos libres activado. Empieza tus órdenes diciendo "Faro", por ejemplo: Faro, qué hay delante.');
     handsFreeLoop();
   },
   handsfree_off() { S.handsFree = false; store.save(); listener.abort(); say('Manos libres desactivado. Toca la pantalla para hablarme.'); },
@@ -763,4 +763,4 @@ function drawOverlay(objects, W, H) {
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
 // para depurar desde la consola
-window.amaru = { handle, app, store, vision, ped, compass, gps };
+window.faro = { handle, app, store, vision, ped, compass, gps };

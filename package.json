@@ -1,5 +1,5 @@
 {
-  "name": "amaru",
+  "name": "faro",
   "version": "1.0.0",
   "description": "Guía por voz para personas ciegas: cámara, pasos y GPS, todo en el teléfono, sin APIs.",
   "type": "module",

@@ -92,14 +92,14 @@ export function withAccents(name, raw) {
   return name;
 }
 
-const WAKE = /^(?:oye\s+|hola\s+)?(?:amaru|a maru|amaro|amar u|hamaru)\b[\s,]*/;
+const WAKE = /^(?:oye\s+|hola\s+)?(?:faro|faros|pharo|el faro)\b[\s,]*/;
 
 export function stripWake(t) {
   return t.replace(WAKE, '').trim();
 }
 
 export function hasWake(text) {
-  return WAKE.test(normalize(text)) || /\b(amaru|a maru|amaro)\b/.test(normalize(text));
+  return WAKE.test(normalize(text)) || /\b(faro|faros|pharo)\b/.test(normalize(text));
 }
 
 const ON = '(?:activa|activar|enciende|encender|prende|pon|empieza|inicia|arranca|abre)';

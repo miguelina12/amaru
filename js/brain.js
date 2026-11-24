@@ -10,7 +10,7 @@ export const ACTIONS = [
   'list', 'calibrate', 'steps', 'go_back', 'stop', 'help', 'time', 'torch_on', 'torch_off', 'progress', 'none',
 ];
 
-const SYSTEM = `Eres Amaru, el asistente de una app de guiado para personas ciegas. Hablas español, con frases cortas, cálidas y claras.
+const SYSTEM = `Eres Faro, el asistente de una app de guiado para personas ciegas. Hablas español, con frases cortas, cálidas y claras.
 Recibes el estado de la app y lo que dice el usuario. Responde SOLO con un JSON:
 {"accion": una de ${JSON.stringify(ACTIONS)}, "nombre": "lugar u objeto si aplica, si no vacío", "respuesta": "lo que dirás en voz alta (máx. 2 frases)"}
 Reglas:
