@@ -107,6 +107,7 @@ const OFF = '(?:apaga|apagar|desactiva|desactivar|quita|pausa|deten|cierra)';
 
 // Orden importante: las reglas más específicas primero.
 const RULES = [
+  ['download_map', /\b(?:descarga|descargar|bajate|baja|actualiza|actualizar|consigue)\b.*\bmapas?\b/],
   ['stop', /^(?:para|parar|detente|deten|alto|basta|stop|silencio|calla|callate|cancela|cancelar|cancelalo|frena)(?: (?:todo|ya|de hablar|la guia|la navegacion))?$/],
   ['stop', /\b(?:cancela|deten|para|termina)(?: la)? (?:navegacion|guia|busqueda|calibracion)\b/],
   ['cancel_record', /\b(?:cancela|descarta|borra|anula)(?: la)? grabacion\b/],
@@ -155,7 +156,91 @@ const RULES = [
   ['thanks', /\b(?:gracias|muchas gracias|genial|perfecto)\b/],
 ];
 
+// ---------- Orden más parecida (cuando el reconocimiento de voz escribe mal las palabras)
+
+const EXAMPLES = {
+  describe: ['que hay delante', 'que ves', 'que tengo enfrente', 'describe lo que hay', 'que hay alrededor', 'mira delante'],
+  where: ['donde estoy', 'en que calle estoy', 'cual es mi ubicacion', 'donde me encuentro'],
+  heading: ['hacia donde miro', 'donde esta el norte', 'en que direccion voy'],
+  help: ['ayuda', 'que puedes hacer', 'como funciona'],
+  stop: ['para', 'detente', 'silencio', 'callate'],
+  steps: ['cuantos pasos llevo', 'cuanto he caminado'],
+  time: ['que hora es', 'dime la hora'],
+  list: ['que lugares conoces', 'lista de lugares', 'cuales son mis rutas'],
+  repeat: ['repite', 'repitelo', 'que has dicho'],
+  go_back: ['vuelve', 'volver atras', 'llevame de vuelta', 'deshaz el camino'],
+  finish: ['he llegado', 'ya estoy aqui', 'fin de la ruta'],
+  calibrate: ['calibra mis pasos', 'mide mis pasos'],
+  progress: ['cuanto falta', 'cuanto queda', 'falta mucho'],
+  download_map: ['descarga el mapa', 'baja el mapa', 'actualiza el mapa'],
+  torch_on: ['enciende la linterna', 'pon la luz'],
+  aim: ['como tengo la camara', 'apunto bien'],
+};
+
+export const INTENT_DESC = {
+  describe: 'que te diga qué hay delante', where: 'saber dónde estás', heading: 'saber hacia dónde miras',
+  help: 'la ayuda', stop: 'que pare', steps: 'saber cuántos pasos llevas', time: 'saber la hora',
+  list: 'la lista de lugares', repeat: 'que repita', go_back: 'volver por donde has venido', finish: 'decir que has llegado',
+  calibrate: 'calibrar tus pasos', progress: 'saber cuánto falta', download_map: 'descargar el mapa',
+  torch_on: 'encender la linterna', aim: 'comprobar la cámara',
+};
+
+function fuzzyEq(a, b) {
+  if (a === b) return true;
+  const n = Math.min(a.length, b.length);
+  if (n >= 4 && levenshtein(a, b) <= 1) return true;
+  if (n >= 7 && levenshtein(a, b) <= 2) return true;
+  return false;
+}
+
+function dice(a, b) {
+  const used = new Set();
+  let m = 0;
+  for (const x of a) {
+    const j = b.findIndex((y, k) => !used.has(k) && fuzzyEq(x, y));
+    if (j >= 0) { used.add(j); m++; }
+  }
+  return (2 * m) / (a.length + b.length);
+}
+
+/** La orden de ejemplo más parecida: { intent, score } (score 0..1). */
+export function guess(text) {
+  const t = normalize(text).replace(/\s+/g, ' ').split(' ').filter(Boolean);
+  // une palabras partidas: "de lante" -> "delante", "don de" -> "donde"
+  const joined = [];
+  for (let i = 0; i < t.length; i++) {
+    if (i + 1 < t.length && ['delante', 'donde', 'enfrente', 'alrededor'].includes(t[i] + t[i + 1])) { joined.push(t[i] + t[i + 1]); i++; }
+    else joined.push(t[i].replace(/^k$/, 'que').replace(/^ay$/, 'hay'));
+  }
+  let best = { intent: null, score: 0 };
+  for (const [intent, list] of Object.entries(EXAMPLES)) {
+    for (const ex of list) {
+      const sc = dice(joined, ex.split(' '));
+      if (sc > best.score) best = { intent, score: sc };
+    }
+  }
+  return best;
+}
+
 export function parse(raw) {
+  const r = parseRules(raw);
+  if (r.intent !== 'unknown') return r;
+  const g = guess(r.text);
+  if (g.score >= 0.72) return { intent: g.intent, text: r.text, fuzzy: true };
+  if (g.score >= 0.5) return { ...r, suggestion: g.intent };
+  return r;
+}
+
+/** De varias transcripciones posibles, la primera que se entiende (prefiere las exactas). */
+export function parseBest(alternatives) {
+  const list = alternatives.filter(Boolean);
+  const parsed = list.map((a) => parse(a));
+  return parsed.find((p) => p.intent !== 'unknown' && !p.fuzzy)
+    || parsed.find((p) => p.intent !== 'unknown')
+    || parsed[0] || { intent: 'empty', text: '' };
+}
+
+function parseRules(raw) {
   const text = stripWake(normalize(raw));
   if (!text) return { intent: 'empty', text };
   for (const [intent, re] of RULES) {

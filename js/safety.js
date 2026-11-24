@@ -9,6 +9,7 @@
 
 import * as labels from './labels.js';
 import { stepsFor } from './geo.js';
+import { canMove } from './plausibility.js';
 
 const FORGET_MS = 4000; // si no se ve en este tiempo, el encuentro termina
 const WARN_GAP_MS = 4000; // separación mínima entre avisos normales
@@ -21,8 +22,6 @@ export class Safety {
     this.enabled = true;
     this.tracks = new Map(); // grupo -> { hits, lastSeen, d, v, warned, dangerAt }
     this.lastWarn = 0;
-    this.flatCount = 0;
-    this.lastFlat = 0;
     this.lastObjects = [];
     this.confirm = 3; // imágenes seguidas para confirmar un objeto (2 en móviles lentos)
     this.frameMs = 250;
@@ -45,13 +44,17 @@ export class Safety {
     }
     for (const [g, o] of seen) {
       let t = this.tracks.get(g);
-      if (!t || now - t.lastSeen > FORGET_MS) t = { hits: 0, lastSeen: 0, d: o.dist, v: 0, warned: false, dangerAt: 0 };
-      if (now - t.lastSeen < 1500 && t.d != null) {
-        const inst = (t.d - o.dist) / Math.max(0.1, (now - t.lastSeen) / 1000);
-        t.v = 0.7 * t.v + 0.3 * Math.max(-3, Math.min(3, inst));
+      if (!t || now - t.lastSeen > FORGET_MS) t = { hits: 0, lastSeen: 0, d: o.dist, v: 0, nv: 0, warned: false, dangerAt: 0 };
+      if (now - t.lastSeen < 1500 && t.raw != null) {
+        // velocidad con la que se acerca el objeto POR SÍ MISMO: restamos lo que caminas tú
+        const closing = (t.raw - o.dist) / Math.max(0.1, (now - t.lastSeen) / 1000);
+        const own = this.ctx.speed ? this.ctx.speed() : 0;
+        t.v = 0.7 * t.v + 0.3 * Math.max(-3, Math.min(4, closing - own));
+        t.nv++;
       }
       t.hits = now - t.lastSeen < Math.max(1200, 2.5 * this.frameMs) ? t.hits + 1 : 1;
       t.lastSeen = now;
+      t.raw = o.dist;
       t.d = t.d == null ? o.dist : 0.5 * t.d + 0.5 * o.dist; // suaviza la distancia
       t.obj = o;
       this.tracks.set(g, t);
@@ -106,7 +109,8 @@ export class Safety {
       const o = t.obj;
       const hazard = labels.HAZARDS.has(o.cls);
       const vehicle = labels.VEHICLES.has(o.cls);
-      const approaching = t.v > 0.6 && t.d / t.v < 2.5; // algo viene hacia ti
+      // "Viene hacia ti" solo si puede moverse, se acerca más rápido que tú y lo hemos medido varias veces
+      const approaching = canMove(o.cls) && t.nv >= 3 && t.v > 0.9 && t.d < 8 && t.d / t.v < 3;
       if (!moving && !approaching) continue;
       const pan = Math.max(-1, Math.min(1, o.angle / 30));
       const nm = labels.cap(labels.name(o.cls));
@@ -139,6 +143,7 @@ export class Safety {
         const steps = stepsFor(t.d, sl);
         this.ctx.cue.warn(pan);
         let msg = `${nm} delante, a ${steps} ${steps === 1 ? 'paso' : 'pasos'}.`;
+        if (vehicle && Math.abs(t.v) < 0.5) msg = `${nm} parado delante, a ${steps} pasos.`;
         if (hazard) msg = `Cuidado: ${labels.name(o.cls)} delante, a ${steps} pasos.`;
         else if (o.cls === 'door') msg = `Puerta delante, a ${steps} pasos.`;
         else {
@@ -151,19 +156,14 @@ export class Safety {
     }
   }
 
-  /** Paredes lisas: el detector no las ve. Aviso muy conservador. */
-  onQuality(q) {
-    if (!this.enabled || q.covered || q.dark) { this.flatCount = 0; return; }
-    const nothingDetected = !this.lastObjects.some((o) => o.inPath && o.obstacle);
-    const flat = q.centerStd < 9 && q.centerEdges < 0.02;
-    if (this.ctx.walking() && nothingDetected && flat) this.flatCount++;
-    else this.flatCount = 0;
-    if (this.flatCount >= 6 && Date.now() - this.lastFlat > 30000 && Date.now() - this.lastWarn > WARN_GAP_MS) {
-      this.lastFlat = Date.now();
-      this.lastWarn = Date.now();
-      this.flatCount = 0;
-      this.ctx.cue.warn(0);
-      this.ctx.say('Puede haber una pared delante.', { priority: 'normal', remember: false });
-    }
+  /** Lista de objetos confirmados (vistos en varias imágenes): lo que Faro da por seguro. */
+  confirmed() {
+    const now = Date.now();
+    return [...this.tracks.values()]
+      .filter((t) => t.hits >= this.confirm && now - t.lastSeen < 2500)
+      .map((t) => ({ ...t.obj, dist: t.d }));
   }
+
+  // Las paredes lisas no se avisan: la heurística daba falsas alarmas.
+  onQuality() {}
 }

@@ -7,14 +7,14 @@ const MODELS = ['Qwen2.5-1.5B-Instruct-q4f16_1-MLC', 'Llama-3.2-1B-Instruct-q4f1
 
 export const ACTIONS = [
   'navigate', 'record_route', 'finish', 'save_place', 'describe', 'find', 'where', 'where_is', 'heading',
-  'list', 'calibrate', 'steps', 'go_back', 'stop', 'help', 'time', 'torch_on', 'torch_off', 'progress', 'none',
+  'list', 'calibrate', 'steps', 'go_back', 'stop', 'help', 'time', 'torch_on', 'torch_off', 'progress', 'download_map', 'none',
 ];
 
 const SYSTEM = `Eres Faro, el asistente de una app de guiado para personas ciegas. Hablas español, con frases cortas, cálidas y claras.
 Recibes el estado de la app y lo que dice el usuario. Responde SOLO con un JSON:
 {"accion": una de ${JSON.stringify(ACTIONS)}, "nombre": "lugar u objeto si aplica, si no vacío", "respuesta": "lo que dirás en voz alta (máx. 2 frases)"}
 Reglas:
-- Si el usuario quiere ir a un sitio conocido: accion "navigate" con "nombre".
+- Si el usuario quiere ir a un sitio (lugar guardado, calle con número, o tipo de sitio como farmacia): accion "navigate" con "nombre" (por ejemplo "calle Mayor 5" o "farmacia").
 - Si pregunta qué hay delante: "describe". Si busca un objeto: "find".
 - Si pide algo que la app no puede hacer, accion "none" y explícalo con amabilidad.
 - Nunca inventes obstáculos ni lugares: usa solo los del estado.

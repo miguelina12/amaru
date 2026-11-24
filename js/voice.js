@@ -112,9 +112,12 @@ export class Voice {
 }
 
 export class Listener {
-  constructor(lang = 'es-ES') {
+  constructor(lang) {
     this.SR = window.SpeechRecognition || window.webkitSpeechRecognition || null;
-    this.lang = lang;
+    // Tu variante de español (es-MX, es-AR, es-ES…) reconoce mejor tu acento.
+    const nav = (navigator.languages || [navigator.language || '']).find((l) => /^es\b|^es-/i.test(l));
+    this.lang = lang || nav || 'es-ES';
+    this.hints = []; // palabras que esperamos oír (nombres de lugares, órdenes)
     this.local = false;
     this.rec = null;
   }
@@ -147,7 +150,7 @@ export class Listener {
     return this.local;
   }
 
-  /** Escucha una frase. Resuelve con el texto o null si no se oyó nada. */
+  /** Escucha una frase. Resuelve con la lista de transcripciones posibles (la mejor primero) o null. */
   listen({ timeoutMs = 9000 } = {}) {
     return new Promise((resolve, reject) => {
       if (!this.SR) return reject(new Error('unsupported'));
@@ -157,7 +160,13 @@ export class Listener {
       rec.lang = this.lang;
       rec.interimResults = false;
       rec.continuous = false;
-      rec.maxAlternatives = 3;
+      rec.maxAlternatives = 5;
+      try {
+        // Pistas de vocabulario (solo navegadores que lo admiten)
+        if ('phrases' in rec && window.SpeechRecognitionPhrase && this.hints.length) {
+          rec.phrases = this.hints.slice(0, 50).map((p) => new window.SpeechRecognitionPhrase(p, 3));
+        }
+      } catch {}
       if (this.local) {
         if ('processLocally' in rec) rec.processLocally = true;
         else if ('mode' in rec) rec.mode = 'ondevice-only';
@@ -173,9 +182,10 @@ export class Listener {
       const timer = setTimeout(() => { try { rec.stop(); } catch {} }, timeoutMs);
       rec.onresult = (e) => {
         const res = e.results[0];
-        let best = res[0];
-        for (let i = 1; i < res.length; i++) if (res[i].confidence > best.confidence) best = res[i];
-        finish(best.transcript);
+        const alts = [];
+        for (let i = 0; i < res.length; i++) alts.push(res[i]);
+        alts.sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+        finish(alts.map((a) => a.transcript.trim()).filter(Boolean));
       };
       rec.onerror = (e) => {
         if (e.error === 'no-speech' || e.error === 'aborted') finish(null);

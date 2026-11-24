@@ -24,6 +24,7 @@ export class Pedometer extends EventTarget {
     this._peakT = 0;
     this._candidate = 0;
     this.sensitivity = 1; // multiplicador del umbral
+    this._intervals = [];
     this._on = this._on.bind(this);
   }
 
@@ -44,6 +45,13 @@ export class Pedometer extends EventTarget {
 
   get walking() {
     return Date.now() - this.lastStep < 1600;
+  }
+
+  /** Velocidad al caminar en m/s (0 si estás parado). */
+  speed(stepLength = 0.65) {
+    if (!this.walking || this._intervals.length < 2) return 0;
+    const avg = this._intervals.reduce((a, b) => a + b, 0) / this._intervals.length;
+    return stepLength / (avg / 1000);
   }
 
   _on(e) {
@@ -85,8 +93,13 @@ export class Pedometer extends EventTarget {
   }
 
   _emit() {
+    const now = Date.now();
+    if (this.lastStep && now - this.lastStep < 2000) {
+      this._intervals.push(now - this.lastStep);
+      if (this._intervals.length > 6) this._intervals.shift();
+    } else this._intervals = [];
     this.count++;
-    this.lastStep = Date.now();
+    this.lastStep = now;
     this.dispatchEvent(new CustomEvent('step', { detail: { count: this.count } }));
   }
 }

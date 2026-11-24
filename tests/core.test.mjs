@@ -229,3 +229,55 @@ test('paso de peatones se anuncia una vez', () => {
   for (let i = 0; i < 8; i++) s.onDetections([obj('crosswalk', 5, { obstacle: false, inPath: false })]);
   assert.deepEqual(said, ['Paso de peatones delante.']);
 });
+
+import { implausible } from '../js/plausibility.js';
+
+test('sentido común: un coche aparcado no "viene hacia ti" cuando eres tú quien camina', async () => {
+  const said = [];
+  const s = new Safety({
+    say: (t) => said.push(t), cue: { danger() {}, warn() {} }, sonar: { update() {} },
+    walking: () => true, speed: () => 1.2, stepLength: () => 0.7, navigating: () => false,
+  });
+  // caminas a 1,2 m/s hacia un coche quieto: la distancia baja 1,2 m cada segundo
+  let d = 7;
+  for (let i = 0; i < 12; i++) {
+    s.onDetections([obj('car', d)]);
+    await new Promise((r) => setTimeout(r, 100));
+    d -= 0.12;
+  }
+  assert.ok(!said.some((t) => /viene hacia ti/.test(t)), said.join(' | '));
+  assert.ok(said.some((t) => /Coche parado delante/.test(t)), said.join(' | '));
+});
+
+test('sentido común: un coche que sí viene hacia ti', async () => {
+  const said = [];
+  const s = new Safety({
+    say: (t) => said.push(t), cue: { danger() {}, warn() {} }, sonar: { update() {} },
+    walking: () => false, speed: () => 0, stepLength: () => 0.7, navigating: () => false,
+  });
+  let d = 7;
+  for (let i = 0; i < 10; i++) { s.onDetections([obj('car', d)]); await new Promise((r) => setTimeout(r, 100)); d -= 0.3; }
+  assert.ok(said.some((t) => /viene hacia ti/.test(t)), said.join(' | '));
+});
+
+test('sentido común: una puerta nunca "viene hacia ti"', async () => {
+  const said = [];
+  const s = new Safety({
+    say: (t) => said.push(t), cue: { danger() {}, warn() {} }, sonar: { update() {} },
+    walking: () => false, speed: () => 0, stepLength: () => 0.7, navigating: () => false,
+  });
+  let d = 6;
+  for (let i = 0; i < 10; i++) { s.onDetections([obj('door', d)]); await new Promise((r) => setTimeout(r, 100)); d -= 0.4; }
+  assert.ok(!said.some((t) => /viene hacia ti/.test(t)));
+});
+
+test('filtro de sentido común', () => {
+  const base = { score: 0.9, est: {}, clipped: {}, pxW: 100, pxH: 300 };
+  assert.equal(implausible({ ...base, cls: 'person' }), null);
+  assert.equal(implausible({ ...base, cls: 'person', pxW: 400, pxH: 200 }), 'forma no humana');
+  assert.equal(implausible({ ...base, cls: 'person', score: 0.4 }), 'poca seguridad');
+  assert.equal(implausible({ ...base, cls: 'car', score: 0.6 }, 'indoor'), 'no encaja dentro de casa');
+  assert.equal(implausible({ ...base, cls: 'bed', score: 0.6 }, 'outdoor'), 'no encaja en la calle');
+  assert.equal(implausible({ ...base, cls: 'chair', est: { byH: 1, byW: 4 } }), 'proporciones imposibles');
+  assert.equal(implausible({ ...base, cls: 'person', est: { ground: 3 }, realH: 0.3 }), 'tamaño imposible');
+});

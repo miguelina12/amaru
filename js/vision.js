@@ -5,6 +5,7 @@
 import * as labels from './labels.js';
 import { clockOf } from './geo.js';
 import { YoloDetector } from './detector.js';
+import { filter as plausible } from './plausibility.js';
 
 const YOLO_MODEL = new URL('../models/faro-detector-fp16.onnx', import.meta.url).href;
 const YOLO_NAMES = new URL('../models/faro-classes.json', import.meta.url).href;
@@ -33,6 +34,7 @@ export class Vision extends EventTarget {
     super();
     this.video = video;
     this.getPitch = getPitch || (() => null);
+    this.getScene = () => 'unknown'; // 'indoor' | 'outdoor', lo pone la app según el GPS
     this.model = null;
     this.stream = null;
     this.track = null;
@@ -78,7 +80,7 @@ export class Vision extends EventTarget {
       const names = await (await fetch(YOLO_NAMES)).json();
       const yolo = new YoloDetector({ modelUrl: YOLO_MODEL, names, wanted: new Set(names.filter(labels.KNOWN)), size: 416, groupOf: labels.group });
       await yolo.load();
-      this.model = { detect: (src, W, H) => yolo.detect(src, W, H, 0.35) };
+      this.model = { detect: (src, W, H) => yolo.detect(src, W, H, 0.4) };
       this.kind = 'yolo-' + yolo.backend;
       return;
     } catch (e) {
@@ -142,7 +144,7 @@ export class Vision extends EventTarget {
     const preds = await this.model.detect(this.video, W, H);
     this.frameMs = performance.now() - t0;
     const pitch = this.getPitch();
-    this.last = preds.map((p) => enrich(p, W, H, pitch));
+    this.last = plausible(preds.map((p) => enrich(p, W, H, pitch)), this.getScene());
     this.lastAt = Date.now();
     this.dispatchEvent(new CustomEvent('detections', { detail: { objects: this.last, W, H } }));
     return this.last;
@@ -205,13 +207,14 @@ export function enrich(p, W, H, pitch) {
   const f = Math.max(W, H) / 2 / Math.tan(((LONG_SIDE_FOV / 2) * Math.PI) / 180);
   const clipTop = y < 4, clipBot = y + h > H - 4;
   const clipL = x < 4, clipR = x + w > W - 4;
-  const est = [];
-  if (inf.h && !clipTop && !clipBot) est.push((inf.h * f) / h);
-  if (inf.w && !clipL && !clipR) est.push((inf.w * f) / w);
+  const e = {};
+  if (inf.h && !clipTop && !clipBot) e.byH = (inf.h * f) / h;
+  if (inf.w && !clipL && !clipR) e.byW = (inf.w * f) / w;
   if (!clipBot && pitch != null && pitch > 20 && pitch < 140) {
     const down = 90 - pitch + (Math.atan((y + h - H / 2) / f) * 180) / Math.PI;
-    if (down > 3) est.push(CAMERA_HEIGHT / Math.tan((down * Math.PI) / 180));
+    if (down > 3) e.ground = CAMERA_HEIGHT / Math.tan((down * Math.PI) / 180);
   }
+  const est = [e.byH, e.byW, e.ground].filter((v) => v != null);
   let dist = est.length ? Math.min(...est) : null;
   if (dist == null && h > 0.7 * H) dist = 0.7;
   if (dist != null) dist = Math.max(0.3, Math.min(dist, 30));
@@ -237,5 +240,10 @@ export function enrich(p, W, H, pitch) {
     inPath,
     lateral: dist != null ? (dist * (cx - W / 2)) / f : null,
     obstacle: inf.obstacle,
+    est: e,
+    pxW: w,
+    pxH: h,
+    clipped: { top: clipTop, bottom: clipBot, left: clipL, right: clipR },
+    realH: e.ground ? (h * e.ground) / f : null,
   };
 }

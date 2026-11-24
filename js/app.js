@@ -7,17 +7,18 @@ import { Store } from './store.js';
 import { RouteRecorder, StepGuide, GpsGuide, reverseRoute, describeRoute } from './navigator.js';
 import { Vision } from './vision.js';
 import { Safety } from './safety.js';
-import { parse, findBest, cleanName, hasWake, stripWake, normalize } from './intents.js';
+import { parse, parseBest, INTENT_DESC, findBest, cleanName, hasWake, stripWake, normalize } from './intents.js';
 import { Brain } from './brain.js';
 import * as geo from './geo.js';
 import * as labels from './labels.js';
+import { MapData, MapGuide, download as downloadMap, saveMap, loadMap, withArticle as withArt } from './map.js';
 
 const $ = (id) => document.getElementById(id);
 
 const store = new Store();
 const S = store.settings;
 const voice = new Voice(S, () => store.save());
-const listener = new Listener('es-ES');
+const listener = new Listener();
 const ped = new Pedometer();
 const compass = new Compass();
 const gps = new Gps();
@@ -36,6 +37,7 @@ const app = {
   here: null, // nombre del último lugar donde está el usuario
   listening: false,
   aimBad: false,
+  map: null, // MapData: calles descargadas de OpenStreetMap
   lastAim: 0,
 };
 
@@ -59,9 +61,19 @@ function heard(text) {
 const safety = new Safety({
   say, cue: audio.cue, sonar,
   walking: () => ped.walking,
+  speed: () => ped.speed(stepLength()),
   stepLength,
   navigating: () => !!app.nav,
 });
+
+/** ¿Dentro o fuera? Con buena señal GPS reciente, casi seguro en la calle. */
+vision.getScene = () => {
+  const p = gps.last;
+  if (!p || Date.now() - p.t > 20000) return 'indoor';
+  if (p.acc <= 15) return 'outdoor';
+  if (p.acc >= 40) return 'indoor';
+  return 'unknown';
+};
 
 // ------------------------------------------------------------------ arranque
 
@@ -105,6 +117,7 @@ async function start() {
   setInterval(aimCoach, 2500);
   setInterval(updateInfo, 2000);
   updateInfo();
+  loadMap().then((d) => { if (d) { app.map = new MapData(d); log('Mapa de calles cargado'); } }).catch(() => {});
   if (S.brain) enableBrain(true);
   if (S.handsFree) handsFreeLoop();
 }
@@ -219,15 +232,15 @@ async function listenOnce() {
   if (!listener.supported) return say('No puedo escuchar en este navegador. Usa los botones o escribe.');
   if (app.listening) return;
   voice.stop();
-  if (!app.localChecked) { app.localChecked = true; await listener.prepareLocal(); }
+  listener.hints = ['Faro', ...store.placeNames(), ...store.routeNames(), 'llévame a', 'qué hay delante', 'dónde estoy'];
   app.listening = true;
   $('talk').classList.add('on');
   $('talkLabel').textContent = 'Te escucho';
   audio.cue.listen();
   try {
-    const text = await listener.listen();
+    const alts = await listener.listen();
     audio.cue.heard();
-    if (text) await handle(text);
+    if (alts?.length) await handle(alts);
     else say('No te he oído. Toca otra vez y habla.', { remember: false });
   } catch (e) {
     if (String(e.message).includes('not-allowed')) say('Necesito permiso para usar el micrófono.');
@@ -237,6 +250,8 @@ async function listenOnce() {
     $('talk').classList.remove('on');
     $('talkLabel').textContent = 'Hablar';
   }
+  // Después de la primera escucha, prepara el reconocimiento dentro del teléfono (sin bloquear).
+  if (!app.localChecked) { app.localChecked = true; listener.prepareLocal(); }
 }
 
 async function handsFreeLoop() {
@@ -248,10 +263,11 @@ async function handsFreeLoop() {
     let text = null;
     try { text = await listener.listen({ timeoutMs: 12000 }); } catch { await sleep(1500); }
     app.listening = false;
-    if (text && hasWake(text)) {
+    const woke = text?.filter((t) => hasWake(t));
+    if (woke?.length) {
       audio.cue.heard();
-      const rest = stripWake(normalize(text));
-      if (rest) await handle(rest);
+      const rest = woke.map((t) => stripWake(normalize(t))).filter(Boolean);
+      if (rest.length) await handle(rest);
       else await listenOnce();
     }
   }
@@ -274,14 +290,24 @@ function brainState() {
   };
 }
 
+/** raw: texto, o lista de transcripciones posibles del reconocimiento de voz. */
 async function handle(raw) {
+  const alts = Array.isArray(raw) ? raw : [raw];
+  let cmd = parseBest(alts);
+  raw = cmd.text && alts.find((a) => normalize(a) === cmd.text) || alts[0];
   heard(raw);
-  let cmd = parse(raw);
 
   if (app.awaiting && !['stop', 'help', 'repeat'].includes(cmd.intent)) {
     const a = app.awaiting;
     app.awaiting = null;
     return a.resolve(cmd, raw);
+  }
+
+  if (cmd.intent === 'unknown' && cmd.suggestion && !brain.ready) {
+    const sug = cmd.suggestion;
+    say(`No estoy seguro. ¿Querías ${INTENT_DESC[sug] || sug}? Di sí o no.`);
+    app.awaiting = { resolve: (c) => (c.intent === 'yes' ? run({ intent: sug, text: '' }) : say('Vale. Dímelo de otra forma.')) };
+    return;
   }
 
   if (cmd.intent === 'unknown' && brain.ready) {
@@ -317,6 +343,7 @@ const handlers = {
     say('Puedo avisarte de obstáculos con la cámara, decirte qué hay delante y buscar objetos. ' +
       'Para tu casa: di "graba ruta a la cocina", camina, y al llegar di "he llegado". Después di "llévame a la cocina". ' +
       'En la calle: di "guarda este lugar como portal" y luego "llévame al portal". ' +
+      'Para ir por calles con su nombre, di una vez: descarga el mapa. Luego: llévame a la calle Mayor 5, o a la farmacia más cercana. ' +
       'También: dónde estoy, hacia dónde miro, calibra mis pasos, vuelve, activa el sónar, y para.');
   },
 
@@ -382,12 +409,14 @@ const handlers = {
 
   navigate(cmd) {
     const routes = store.routeNames(), places = store.placeNames();
-    const name = findBest(cmd.name, [...new Set([...routes, ...places])]);
+    const known = [...new Set([...routes, ...places])];
+    // Lugares y rutas tuyos primero; si no, el mapa de calles.
+    const name = findBest(cmd.name, known, app.map ? 0.75 : 0.6);
     if (!name) {
-      const known = [...new Set([...routes, ...places])];
+      if (app.map) return navigateMap(cmd.name);
       return say(known.length
-        ? `No conozco ${cmd.name}. Conozco: ${known.slice(0, 8).join(', ')}.`
-        : `Todavía no conozco ${cmd.name}. Primero graba la ruta: di "graba ruta a ${cmd.name}" y camina hasta allí.`);
+        ? `No conozco ${cmd.name}. Conozco: ${known.slice(0, 8).join(', ')}. Si es una calle o un sitio de tu barrio, primero di: descarga el mapa.`
+        : `Todavía no conozco ${cmd.name}. Si es una calle o un sitio de tu barrio, di: descarga el mapa. Si es dentro de casa, di: graba ruta a ${cmd.name}, y camina hasta allí.`);
     }
     app.finding = null;
     const route = store.route(name);
@@ -428,6 +457,25 @@ const handlers = {
   progress() {
     if (app.nav) say(app.nav.progress());
     else say('Ahora mismo no te estoy guiando a ningún sitio.');
+  },
+
+  async download_map() {
+    const p = gps.good(60);
+    if (!p) return say('Necesito señal GPS para saber qué zona descargar. Sal a la calle o acércate a una ventana y vuelve a pedírmelo.');
+    if (!navigator.onLine) return say('Necesito conexión a internet solo para esta descarga.');
+    const R = 2000;
+    say('Descargo el mapa de calles de 2 kilómetros a tu alrededor, de OpenStreetMap. Es una sola vez y puede tardar un minuto.');
+    try {
+      const data = await downloadMap(p, R);
+      await saveMap(data);
+      app.map = new MapData(data);
+      const st = app.map.stats;
+      audio.cue.ok();
+      const pl = (n, a, b) => `${n} ${n === 1 ? a : b}`;
+      say(`Mapa guardado: ${pl(st.streets, 'calle', 'calles')}, ${pl(st.addresses, 'número de portal', 'números de portal')} y ${pl(st.places, 'lugar', 'lugares')}. Ya funciona sin internet. Prueba: llévame a la farmacia más cercana, o llévame a la calle y número que quieras.`);
+    } catch {
+      say('No he podido descargar el mapa. Comprueba la conexión y vuelve a intentarlo en un rato.');
+    }
   },
 
   // ---------- lugares
@@ -477,15 +525,22 @@ const handlers = {
     if (!p || Date.now() - p.t > 30000) {
       parts.push('No tengo señal GPS. Probablemente estás en interior.');
     } else {
-      const known = store.placeNames().map((n) => store.place(n)).filter((x) => x.lat != null);
+      const known = store.placeNames().map((n) => store.place(n)).filter((x) => x.lat != null && geo.haversine(p, x) < 1500);
       if (known.length) {
         known.sort((a, b) => geo.haversine(p, a) - geo.haversine(p, b));
         const n = known[0];
         const d = geo.haversine(p, n);
         const rel = compass.heading != null ? geo.angleDiff(geo.bearing(p, n), compass.heading) : null;
         parts.push(d < 15 ? `Estás en ${n.name}.` : `Estás a ${geo.distancePhrase(d, stepLength())} de ${n.name}${rel != null ? ', ' + geo.clockPhrase(rel) : ''}.`);
-      } else {
-        parts.push(`Tengo tu posición, con ${Math.round(p.acc)} metros de precisión. Sin servicios externos no sé el nombre de la calle; guarda lugares y te oriento respecto a ellos.`);
+      }
+      const st = app.map && app.map.covers(p) ? app.map.streetAt(p) : null;
+      if (st?.name && st.d < 40) {
+        const num = app.map.nearestNumber(p, st.name);
+        parts.unshift(`Estás en ${withArt(st.name)}${num ? ', cerca del número ' + num : ''}.`);
+      } else if (!known.length) {
+        parts.push(app.map
+          ? `Tengo tu posición, con ${Math.round(p.acc)} metros de precisión, pero estás fuera del mapa descargado.`
+          : `Tengo tu posición, con ${Math.round(p.acc)} metros de precisión. Para saber el nombre de la calle, di: descarga el mapa.`);
       }
       if (p.acc > 30) parts.push('La señal es débil.');
     }
@@ -521,7 +576,9 @@ const handlers = {
   async describe() {
     if (!vision.stream) return say('La cámara está apagada.');
     if (!vision.model) return say('El detector todavía se está cargando.');
-    const objs = Date.now() - vision.lastAt < 1500 ? vision.last : await vision.detectNow();
+    // Solo lo que se ha visto de forma estable; si aún no hay nada estable, miramos un momento.
+    let objs = safety.confirmed();
+    if (!objs.length) { await sleep(900); objs = safety.confirmed(); }
     const q = vision.quality;
     if (!objs.length) {
       let m = 'No reconozco objetos delante.';
@@ -638,8 +695,30 @@ function navCtx() {
     heading: () => compass.heading,
     stepLength,
     position: () => gps.good(40),
+    walking: () => ped.walking,
     onArrive: (name) => { app.nav = null; arrivedAt(name); },
+    reroute: (guide) => {
+      const p = gps.good(40) || guide.pos;
+      const rt = p && app.map?.route(p, guide.dest);
+      if (rt) { guide._load(rt); guide.start(false); }
+    },
   };
+}
+
+function navigateMap(text) {
+  const p = gps.good(40) || gps.last;
+  const dest = app.map.find(text, p);
+  if (!dest) return say(`No encuentro ${text} en el mapa. Prueba con el nombre de la calle y el número, o con un tipo de sitio, como farmacia o parada de autobús.`);
+  if (dest.notFound) return say(dest.notFound);
+  if (!p) return say(`He encontrado ${dest.label}, pero necesito señal GPS para guiarte. Sal a un sitio abierto.`);
+  if (!app.map.covers(p)) return say('Estás fuera de la zona del mapa descargado. Di: descarga el mapa, para bajar esta zona.');
+  const rt = app.map.route(p, dest);
+  app.finding = null;
+  if (!rt) {
+    say(`No encuentro un camino a pie hasta ${dest.label}; te indico la dirección en línea recta.`);
+    return startNav(new GpsGuide(dest.label, [dest], navCtx()));
+  }
+  startNav(new MapGuide(app.map, dest, rt, navCtx()));
 }
 
 function startNav(guide) {

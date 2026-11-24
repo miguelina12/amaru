@@ -15,7 +15,7 @@ servidor. Todo se calcula dentro del teléfono:
 | Distancias | Geometría de la cámara: tamaño real del objeto + inclinación del teléfono |
 | Pasos | Acelerómetro con detección de picos y calibración |
 | Orientación | Brújula del teléfono (hacia dónde mira la cámara) |
-| Calle | GPS, rumbo y distancia en línea recta, puntos de ruta grabados |
+| Calle | GPS + mapa de calles de OpenStreetMap descargado **una vez** y guardado en el teléfono: rutas a pie, nombres de calles, números de portal, pasos de peatones y lugares |
 | Comprensión | Analizador de órdenes en español (+ modo inteligente opcional con un LLM local) |
 
 > ⚠️ **Faro es una ayuda, no un sustituto del bastón o del perro guía.** La cámara no ve
@@ -31,7 +31,8 @@ servidor. Todo se calcula dentro del teléfono:
 ### Ejemplos de órdenes
 
 - **Casa:** "graba ruta a la cocina" → caminas → "he llegado". Luego: "llévame a la cocina", "vuelve".
-- **Calle:** "guarda este lugar como portal", "llévame al portal", "¿dónde está la parada?"
+- **Calle:** di una vez "descarga el mapa". Luego "llévame a la calle Mayor 5", "llévame a la farmacia más cercana",
+  "¿dónde estoy?" (te dice la calle y el número), "¿cuánto falta?". También "guarda este lugar como portal".
 - **Cámara:** "¿qué hay delante?", "busca una silla", "¿cómo tengo la cámara?", "enciende la linterna"
 - **Pasos:** "calibra mis pasos", "calibra con diez metros", "mido uno setenta", "¿cuántos pasos llevo?"
 - **Orientación:** "¿dónde estoy?", "¿hacia dónde miro?", "¿cuánto falta?"
@@ -84,8 +85,10 @@ Necesita un móvil reciente con WebGPU (Chrome en Android reciente).
 - **No es tan listo como un modelo grande en la nube.** Sin APIs, el entendimiento es un analizador de
   órdenes muy completo, más un modelo pequeño opcional. Funciona bien con órdenes del día a día y peor
   con conversación abierta.
-- **Sin servicios de mapas no hay nombres de calles ni rutas por calles**: te guía en línea recta hacia
-  lugares guardados o siguiendo rutas que hayas grabado tú.
+- **El mapa de calles se descarga una vez** de OpenStreetMap (servicio Overpass): es la única conexión externa,
+  y envía la zona aproximada (2 km) que se descarga. Después las rutas se calculan sin internet. La calidad
+  depende de lo completo que esté OpenStreetMap en tu barrio; el GPS en ciudad puede desviarse 5–15 m, así
+  que la guía no sustituye a escuchar el tráfico al cruzar.
 - **El GPS falla en interior**: en casa se usan pasos + brújula, y la brújula puede desviarse cerca de
   metales o electrodomésticos.
 - **El detector reconoce unas 40 categorías** elegidas para moverse (personas, puertas, escaleras, postes,
@@ -107,5 +110,7 @@ js/safety.js     avisos anti-choque y sónar
 js/navigator.js  grabación y guiado de rutas (pasos y GPS)
 js/sensors.js    podómetro, brújula y GPS
 js/store.js      memoria local (lugares, rutas, ajustes)
+js/map.js        mapa de calles sin conexión: rutas, direcciones, guía giro a giro
+js/plausibility.js  sentido común: descarta detecciones imposibles
 js/brain.js      modo inteligente con LLM local (opcional)
 ```
