@@ -1,9 +1,10 @@
 // Service worker: guarda la app y el detector en el teléfono para que funcione sin conexión.
-const VERSION = 'faro-v1';
+const VERSION = 'faro-v2';
+const MODELS = 'faro-models-v1'; // aparte, para no volver a descargar el modelo al actualizar la app
 const SHELL = [
   './', 'index.html', 'css/styles.css', 'manifest.webmanifest', 'icons/icon.svg',
   'js/app.js', 'js/voice.js', 'js/audio.js', 'js/sensors.js', 'js/store.js', 'js/navigator.js',
-  'js/vision.js', 'js/safety.js', 'js/intents.js', 'js/labels.js', 'js/geo.js', 'js/brain.js',
+  'js/vision.js', 'js/detector.js', 'js/safety.js', 'js/intents.js', 'js/labels.js', 'js/geo.js', 'js/brain.js',
 ];
 
 self.addEventListener('install', (e) => {
@@ -13,7 +14,7 @@ self.addEventListener('install', (e) => {
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k.startsWith('faro-') && k !== VERSION).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k.startsWith('faro-') && k !== VERSION && k !== MODELS).map((k) => caches.delete(k))))
       .then(() => self.clients.claim()),
   );
 });
@@ -23,7 +24,15 @@ self.addEventListener('fetch', (e) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   const sameOrigin = url.origin === self.location.origin;
-  if (sameOrigin) {
+  if (sameOrigin && url.pathname.includes('/models/')) {
+    // modelo: caché primero (pesa ~20 MB)
+    e.respondWith(
+      caches.open(MODELS).then((c) => c.match(req).then((hit) => hit || fetch(req).then((res) => {
+        if (res.ok) c.put(req, res.clone());
+        return res;
+      }))),
+    );
+  } else if (sameOrigin) {
     // red primero (para recibir actualizaciones), caché si no hay conexión
     e.respondWith(
       fetch(req)

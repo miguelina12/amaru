@@ -5,47 +5,82 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Faro · Guía por voz</title>
   <meta name="description" content="Guía por voz para personas ciegas: cámara, pasos y GPS, todo en el teléfono.">
-  <meta name="theme-color" content="#000000">
+  <meta name="theme-color" content="#05070d">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon.svg">
   <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
-  <main id="start" class="screen">
+  <!-- Inicio -->
+  <main id="start">
+    <div class="hero" aria-hidden="true">
+      <div class="beam"></div>
+      <svg class="tower" viewBox="0 0 120 200">
+        <path d="M44 40 L60 22 L76 40 Z" fill="#f5f5f7"/>
+        <rect x="46" y="40" width="28" height="16" rx="3" fill="#ffd60a"/>
+        <path d="M44 58 h32 l10 124 h-52 z" fill="#f5f5f7"/>
+        <path d="M41 92 h38 l2.5 22 h-43 z M37 140 h46 l2.5 22 h-51 z" fill="#ff453a"/>
+        <rect x="18" y="182" width="84" height="10" rx="5" fill="#f5f5f7"/>
+      </svg>
+    </div>
     <h1>Faro</h1>
-    <p>Tu guía por voz. Usa la cámara, tus pasos y el GPS. Todo funciona dentro del teléfono.</p>
-    <button id="startBtn" class="huge">Toca para empezar</button>
-    <p class="note">Faro es una ayuda. No sustituye al bastón ni al perro guía.</p>
+    <p class="tag">Tu guía por voz. Ve por ti con la cámara, cuenta tus pasos y te orienta en casa y en la calle.</p>
+    <button id="startBtn" class="primary">Empezar</button>
+    <p class="fine">Funciona dentro del teléfono, sin enviar nada. Es una ayuda: no sustituye al bastón ni al perro guía.</p>
   </main>
 
-  <main id="app" class="screen" hidden>
+  <!-- App -->
+  <main id="app" hidden>
     <div id="camwrap" aria-hidden="true">
       <video id="video" playsinline muted autoplay></video>
       <canvas id="overlay"></canvas>
+      <div class="shade"></div>
     </div>
 
-    <button id="talk" class="talk" aria-label="Hablar con Faro. Toca y di lo que necesitas.">Toca para hablar</button>
+    <header class="top" aria-hidden="true">
+      <div class="brand"><span class="dot"></span>Faro</div>
+      <div id="chips" class="chips"></div>
+    </header>
 
-    <div class="row">
-      <button id="btnWhat">¿Qué hay delante?</button>
-      <button id="btnWhere">¿Dónde estoy?</button>
-    </div>
-    <div class="row">
-      <button id="btnStop" class="stop">Parar</button>
-      <button id="btnHelp">Ayuda</button>
-    </div>
+    <section class="caption" aria-hidden="true">
+      <p id="caption">Listo</p>
+      <p id="heard"></p>
+    </section>
 
-    <form id="typeForm" class="type">
-      <label for="typeIn">Escribir una orden</label>
-      <div class="row">
-        <input id="typeIn" autocomplete="off" enterkeyhint="send" placeholder="llévame a la cocina">
-        <button type="submit">Enviar</button>
+    <section class="sheet">
+      <button id="talk" class="mic" aria-label="Hablar con Faro. Toca y di lo que necesitas.">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2Z"/></svg>
+        <span id="talkLabel">Hablar</span>
+      </button>
+
+      <div class="grid">
+        <button id="btnWhat" class="act">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5C6.5 5 2.7 9.4 1.5 12c1.2 2.6 5 7 10.5 7s9.3-4.4 10.5-7C21.3 9.4 17.5 5 12 5Zm0 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8Z"/></svg>
+          <span>¿Qué hay?</span>
+        </button>
+        <button id="btnWhere" class="act">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7Zm0 9.5A2.5 2.5 0 1 1 12 6a2.5 2.5 0 0 1 0 5.5Z"/></svg>
+          <span>¿Dónde estoy?</span>
+        </button>
+        <button id="btnStop" class="act stop">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+          <span>Parar</span>
+        </button>
       </div>
-    </form>
 
-    <div id="info" aria-hidden="true"></div>
-    <div id="status" aria-live="off"></div>
+      <div class="links">
+        <button id="btnHelp" class="link">Ayuda</button>
+        <details class="kbd">
+          <summary class="link">Escribir</summary>
+          <form id="typeForm">
+            <label for="typeIn" class="sr">Escribe una orden</label>
+            <input id="typeIn" autocomplete="off" enterkeyhint="send" placeholder="llévame a la cocina">
+            <button type="submit" class="send" aria-label="Enviar">➜</button>
+          </form>
+        </details>
+      </div>
+    </section>
   </main>
 
   <script type="module" src="js/app.js"></script>

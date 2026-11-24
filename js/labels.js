@@ -85,6 +85,24 @@ const L = {
   toothbrush: ['cepillo de dientes', 'm', 0, 0, false],
 };
 
+
+// ---- Vocabulario del detector de Faro (YOLOE, categorías elegidas para moverse sin ver).
+// Las que coinciden con COCO (person, chair, car…) reutilizan las entradas de arriba.
+const FARO = {
+  door: ['puerta', 'f', 2.0, 0.85, true], stairs: ['escaleras', 'fp', 0, 1.0, true],
+  table: ['mesa', 'f', 0.75, 1.2, true], sofa: ['sofá', 'm', 0.85, 2.0, true],
+  van: ['furgoneta', 'f', 2.0, 1.9, true], pole: ['poste', 'm', 0, 0.15, true], 'street lamp': ['farola', 'f', 0, 0.3, true],
+  tree: ['árbol', 'm', 0, 0.5, true], 'trash can': ['papelera', 'f', 0.9, 0.5, true], fence: ['valla', 'f', 0, 0, true],
+  cabinet: ['armario', 'm', 0, 0, true], shelf: ['estantería', 'f', 0, 0, true], window: ['ventana', 'f', 0, 0, false],
+  bathtub: ['bañera', 'f', 0.55, 1.6, true], 'washing machine': ['lavadora', 'f', 0.85, 0.6, true],
+  stroller: ['carrito de bebé', 'm', 1.0, 0.6, true], wheelchair: ['silla de ruedas', 'f', 0.9, 0.65, true],
+  'shopping cart': ['carrito', 'm', 1.0, 0.6, true], scooter: ['patinete', 'm', 1.0, 0.5, true],
+  'traffic cone': ['cono', 'm', 0.5, 0.35, true], 'door handle': ['pomo de la puerta', 'm', 0, 0, false],
+  'light switch': ['interruptor de la luz', 'm', 0, 0, false], column: ['columna', 'f', 0, 0.4, true],
+  crosswalk: ['paso de peatones', 'm', 0, 0, false], box: ['caja', 'f', 0, 0, true],
+};
+for (const [k, v] of Object.entries(FARO)) L[k] = v;
+
 const SYNONYMS = {
   person: ['gente', 'alguien', 'hombre', 'mujer', 'nino', 'nina', 'personas', 'señor', 'senor', 'señora', 'senora'],
   car: ['coches', 'auto', 'carro', 'automovil', 'vehiculo', 'taxi'],
@@ -107,6 +125,16 @@ const SYNONYMS = {
   bottle: ['botella', 'botellas'],
   backpack: ['mochila'],
   remote: ['mando'],
+  door: ['puertas', 'entrada', 'salida', 'portal'],
+  stairs: ['escalera', 'escalones', 'peldanos'],
+  'street lamp': ['farolas', 'farol'],
+  pole: ['postes', 'poste', 'pivote', 'bolardo'],
+  'trash can': ['basura', 'cubo de basura', 'papelera', 'contenedor'],
+  cabinet: ['armarios', 'mueble'],
+  window: ['ventanas'],
+  'door handle': ['pomo', 'manilla', 'picaporte', 'tirador'],
+  'light switch': ['interruptor', 'llave de la luz'],
+  crosswalk: ['paso de cebra', 'paso de peatones', 'cruce'],
 };
 
 const norm = (s) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -118,11 +146,31 @@ export function info(cls) {
 }
 
 export const name = (cls) => info(cls).name;
-export const indef = (cls) => `${info(cls).g === 'f' ? 'una' : 'un'} ${name(cls)}`;
-export const def = (cls) => `${info(cls).g === 'f' ? 'la' : 'el'} ${name(cls)}`;
+const ART = { m: ['un', 'el'], f: ['una', 'la'], mp: ['unos', 'los'], fp: ['unas', 'las'] };
+export const indef = (cls) => `${ART[info(cls).g][0]} ${name(cls)}`;
+export const def = (cls) => `${ART[info(cls).g][1]} ${name(cls)}`;
+export function pluralName(cls) {
+  const n = name(cls);
+  if (plural(cls)) return n;
+  const [first, ...rest] = n.split(' ');
+  if (/s$/.test(first) && !/[áéíóú]s$/.test(first)) return n;
+  const un = { 'á': 'a', 'é': 'e', 'í': 'i', 'ó': 'o', 'ú': 'u' };
+  let p;
+  if (/[aeiouáéó]$/.test(first)) p = first + 's';
+  else if (/[áéíóú][nsl]$/.test(first)) p = first.replace(/[áéíóú](?=[nsl]$)/, (c) => un[c]) + 'es';
+  else p = first + 'es';
+  return [p, ...rest].join(' ');
+}
+export const plural = (cls) => info(cls).g.endsWith('p');
+/** Clave común para clases equivalentes (Man/Woman/Person → persona). */
+export const group = (cls) => name(cls);
+export const HAZARDS = new Set(['stairs']);
+/** Referencias útiles que se anuncian una vez, sin ser obstáculos. */
+export const LANDMARKS = new Set(['crosswalk', 'traffic light']);
+export const KNOWN = (cls) => cls in L;
 export const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
-export const VEHICLES = new Set(['car', 'bus', 'truck', 'motorcycle', 'bicycle', 'train']);
+export const VEHICLES = new Set(['car', 'bus', 'truck', 'motorcycle', 'bicycle', 'train', 'van', 'scooter']);
 
 /** Busca la clase COCO que corresponde a una palabra en español. */
 export function classFromSpanish(word) {

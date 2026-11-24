@@ -47,12 +47,13 @@ function say(text, opts) {
 }
 
 function log(text) {
-  const el = $('status');
-  if (!el) return;
-  const p = document.createElement('p');
-  p.textContent = text;
-  el.prepend(p);
-  while (el.childElementCount > 6) el.lastElementChild.remove();
+  const el = $('caption');
+  if (el) el.textContent = text;
+}
+
+function heard(text) {
+  const el = $('heard');
+  if (el) el.textContent = text ? `«${text}»` : '';
 }
 
 const safety = new Safety({
@@ -71,7 +72,6 @@ async function start() {
   voice.unlock();
   $('start').hidden = true;
   $('app').hidden = false;
-  say('Iniciando Faro.');
 
   const [okMotion, okOrient] = await Promise.all([ped.requestPermission(), compass.requestPermission()]);
   ped.sensitivity = S.sensitivity || 1;
@@ -88,20 +88,23 @@ async function start() {
     camOk = false;
   }
 
-  say('Hola, soy Faro. Toca la pantalla en cualquier sitio para hablarme, o di ayuda para saber qué puedo hacer.');
-  if (camOk) say('Sostén el teléfono a la altura del pecho, en vertical, con la cámara trasera mirando hacia delante.');
-  else say('No he podido abrir la cámara. Revisa los permisos. Puedo guiarte igualmente con pasos y GPS, pero sin avisos de obstáculos.');
-  if (!okMotion || !okOrient) say('No tengo permiso para los sensores de movimiento; no podré contar tus pasos ni orientarte.');
-  if (!S.calibrated) say('Todavía no conozco la longitud de tus pasos. Cuando quieras, di: calibra mis pasos.');
-  if (!listener.supported) say('Este navegador no permite reconocer la voz. Usa los botones grandes o escribe las órdenes.');
+  const tips = ['Hola, soy Faro. Toca el botón grande para hablarme.'];
+  if (camOk) tips.push('Lleva el teléfono a la altura del pecho, con la cámara hacia delante.');
+  else tips.push('No he podido abrir la cámara; te guío con pasos y GPS, pero sin avisos de obstáculos.');
+  if (!okMotion || !okOrient) tips.push('No tengo permiso para los sensores de movimiento.');
+  if (!S.calibrated) tips.push('Cuando quieras, di: calibra mis pasos.');
+  say(tips.join(' '));
+  if (!listener.supported) say('Este navegador no reconoce la voz. Usa los botones o escribe.');
 
   if (camOk) {
     vision.start();
     vision.loadModel()
-      .then(() => say('Detector de obstáculos listo.', { priority: 'low' }))
-      .catch(() => say('No he podido cargar el detector de obstáculos. Conéctate a internet una vez para descargarlo; después funcionará sin conexión.'));
+      .then(() => { log(`Detector listo (${vision.kind})`); audio.cue.ok(); })
+      .catch(() => say('No he podido cargar el detector de obstáculos. Conéctate a internet una vez para descargarlo.'));
   }
   setInterval(aimCoach, 2500);
+  setInterval(updateInfo, 2000);
+  updateInfo();
   if (S.brain) enableBrain(true);
   if (S.handsFree) handsFreeLoop();
 }
@@ -146,6 +149,7 @@ gps.addEventListener('position', (e) => {
 
 vision.addEventListener('detections', (e) => {
   const { objects, W, H } = e.detail;
+  safety.setFrameTime(vision.frameMs || 250);
   safety.onDetections(objects);
   if (app.finding) onFinding(objects);
   drawOverlay(objects, W, H);
@@ -155,41 +159,45 @@ vision.addEventListener('quality', (e) => safety.onQuality(e.detail));
 
 // ------------------------------------------------------------------ "enfócame": colocación de la cámara
 
-function aimProblem() {
+function aimProblem({ strict = false } = {}) {
   const b = compass.pitch, g = compass.roll, q = vision.quality;
   if (!vision.stream) return null;
-  if (q?.covered) return 'Parece que la cámara está tapada. Revisa que tus dedos o la funda no la cubran.';
+  if (q?.covered) return 'La cámara parece tapada.';
   if (b != null) {
-    if (b < 55) return 'Levanta un poco el teléfono. La cámara debe mirar hacia delante, no al suelo.';
-    if (b > 115) return 'Baja un poco el teléfono, la cámara está mirando al techo.';
+    if (b < (strict ? 55 : 40)) return 'Levanta un poco el teléfono, la cámara mira al suelo.';
+    if (b > (strict ? 115 : 130)) return 'Baja un poco el teléfono, la cámara mira al techo.';
   }
-  if (g != null && Math.abs(g) > 30) return `Endereza el teléfono, está inclinado hacia la ${g > 0 ? 'derecha' : 'izquierda'}.`;
+  if (g != null && Math.abs(g) > (strict ? 30 : 45)) return 'Endereza el teléfono.';
   if (q?.dark) return 'dark';
-  if (q?.blurry && !ped.walking) return 'La imagen está borrosa. Limpia la lente o sujeta el teléfono más quieto.';
+  if (strict && q?.blurry) return 'La imagen está borrosa. Limpia la lente o sujeta el teléfono más quieto.';
   return null;
 }
+
+// Avisa de la colocación solo si el problema dura (~7 s) y sin repetirse.
+const aim = { cur: null, count: 0, spoken: null, spokenAt: 0, torchTried: false, darkSaid: 0 };
 
 async function aimCoach() {
   const p = aimProblem();
   const now = Date.now();
   if (p === 'dark') {
-    if (!vision.torchOn && (await vision.torch(true))) say('Hay poca luz. He encendido la linterna.', { priority: 'low' });
-    else if (!vision.torchOn && now - app.lastAim > 20000) {
-      app.lastAim = now;
-      say('Hay muy poca luz y no veo bien los obstáculos. Ve con más cuidado.', { priority: 'low' });
+    if (!vision.torchOn && !aim.torchTried) {
+      aim.torchTried = true;
+      if (await vision.torch(true)) say('Hay poca luz, enciendo la linterna.', { priority: 'low', remember: false });
+    } else if (!vision.torchOn && now - aim.darkSaid > 120000) {
+      aim.darkSaid = now;
+      say('Hay muy poca luz, no veo bien.', { priority: 'low', remember: false });
     }
     return;
   }
-  if (p) {
-    if (now - app.lastAim > (app.aimBad ? 9000 : 4000)) {
-      app.lastAim = now;
-      app.aimBad = true;
-      say(p, { priority: 'low', remember: false });
-    }
-  } else if (app.aimBad) {
-    app.aimBad = false;
-    audio.cue.ok();
-    say('Así, bien colocado.', { priority: 'low', remember: false });
+  if (p !== aim.cur) { aim.cur = p; aim.count = 0; }
+  aim.count++;
+  if (p && aim.count >= 3 && (p !== aim.spoken || now - aim.spokenAt > 30000)) {
+    aim.spoken = p;
+    aim.spokenAt = now;
+    say(p, { priority: 'low', remember: false });
+  } else if (!p && aim.spoken && aim.count >= 2) {
+    aim.spoken = null;
+    audio.cue.ok(); // solo un sonido, sin hablar
   }
 }
 
@@ -214,7 +222,7 @@ async function listenOnce() {
   if (!app.localChecked) { app.localChecked = true; await listener.prepareLocal(); }
   app.listening = true;
   $('talk').classList.add('on');
-  $('talk').textContent = 'Te escucho…';
+  $('talkLabel').textContent = 'Te escucho';
   audio.cue.listen();
   try {
     const text = await listener.listen();
@@ -227,7 +235,7 @@ async function listenOnce() {
   } finally {
     app.listening = false;
     $('talk').classList.remove('on');
-    $('talk').textContent = 'Toca para hablar';
+    $('talkLabel').textContent = 'Hablar';
   }
 }
 
@@ -267,7 +275,7 @@ function brainState() {
 }
 
 async function handle(raw) {
-  log('» ' + raw);
+  heard(raw);
   let cmd = parse(raw);
 
   if (app.awaiting && !['stop', 'help', 'repeat'].includes(cmd.intent)) {
@@ -521,10 +529,23 @@ const handlers = {
       else if (q && q.centerStd < 11) m += ' Puede que tengas una pared o superficie lisa enfrente.';
       return say(m);
     }
-    const sorted = [...objs].sort((a, b) => (a.dist ?? 99) - (b.dist ?? 99)).slice(0, 5);
-    const parts = sorted.map((o) => {
+    const sorted = [...objs].sort((a, b) => (a.dist ?? 99) - (b.dist ?? 99));
+    const byGroup = new Map();
+    for (const o of sorted) {
+      const g = labels.group(o.cls);
+      if (!byGroup.has(g)) byGroup.set(g, []);
+      byGroup.get(g).push(o);
+    }
+    const NUM = ['', 'un', 'dos', 'tres', 'cuatro', 'cinco', 'seis'];
+    const parts = [...byGroup.values()].slice(0, 5).map((list) => {
+      const o = list[0];
       const where = o.clock === 12 ? 'delante' : `a las ${o.clock}`;
       const d = o.dist != null ? `, a ${geo.distancePhrase(o.dist, stepLength())}` : '';
+      if (list.length > 1) {
+        const n = list.length < NUM.length ? NUM[list.length] : list.length;
+        const fem = labels.info(o.cls).g.startsWith('f');
+        return `${n} ${labels.pluralName(o.cls)}, ${fem ? 'la más cercana' : 'el más cercano'} ${where}${d}`;
+      }
       return `${labels.indef(o.cls)} ${where}${d}`;
     });
     say('Veo ' + joinY(parts) + '.');
@@ -591,7 +612,7 @@ const handlers = {
       .catch(() => say('No puedo abrir la cámara.'));
   },
   camera_off() { safety.enabled = false; vision.stopCamera(); sonar.update(0); say('Cámara apagada. Ya no te aviso de obstáculos; ve con cuidado.'); },
-  aim() { const p = aimProblem(); say(!p ? 'La cámara está bien colocada.' : p === 'dark' ? 'Hay poca luz.' : p); },
+  aim() { const p = aimProblem({ strict: true }); say(!p ? 'La cámara está bien colocada.' : p === 'dark' ? 'Hay poca luz.' : p); },
   faster() { S.rate = Math.min(2, +(S.rate + 0.15).toFixed(2)); store.save(); say('Así hablo más rápido.'); },
   slower() { S.rate = Math.max(0.6, +(S.rate - 0.15).toFixed(2)); store.save(); say('Así hablo más despacio.'); },
   next_voice() { const n = voice.nextVoice(); say(n ? `Ahora hablo con la voz ${n}. ¿Te gusta?` : 'Solo tengo una voz en español en este teléfono.'); },
@@ -640,7 +661,7 @@ function onFinding(objects) {
     app.finding = null;
     return say(`No he encontrado ${labels.indef(f.cls)}. Dejo de buscar.`);
   }
-  const hits = objects.filter((o) => o.cls === f.cls).sort((a, b) => (a.dist ?? 99) - (b.dist ?? 99));
+  const hits = objects.filter((o) => labels.group(o.cls) === labels.group(f.cls)).sort((a, b) => (a.dist ?? 99) - (b.dist ?? 99));
   if (!hits.length) {
     if (now - Math.max(f.lastSeen, f.started) > 8000 && now - f.lastSay > 8000) {
       f.lastSay = now;
@@ -732,31 +753,60 @@ async function enableBrain(silent = false) {
 // ------------------------------------------------------------------ pantalla (para acompañantes)
 
 function updateInfo() {
-  const el = $('info');
+  const el = $('chips');
   if (!el) return;
   const p = gps.last;
-  el.textContent =
-    `Pasos ${ped.count} · paso ${Math.round(stepLength() * 100)} cm${S.calibrated ? '' : ' (sin calibrar)'}` +
-    (compass.heading != null ? ` · rumbo ${Math.round(compass.heading)}° ${geo.cardinal(compass.heading)}` : '') +
-    (p ? ` · GPS ±${Math.round(p.acc)} m` : ' · sin GPS') +
-    (app.recording ? ` · grabando "${app.recording.name}"` : '') +
-    (app.nav ? ` · guiando a "${app.nav.route?.name || app.nav.name}"` : '');
+  const chips = [];
+  if (app.recording) chips.push(['● Grabando', true]);
+  if (app.nav) chips.push([`→ ${app.nav.route?.name || app.nav.name}`, true]);
+  chips.push([`${ped.count} pasos`]);
+  if (compass.heading != null) chips.push([geo.cardinal(compass.heading)]);
+  chips.push([p && Date.now() - p.t < 30000 ? `GPS ±${Math.round(p.acc)} m` : 'Sin GPS']);
+  el.replaceChildren(...chips.map(([t, w]) => {
+    const c = document.createElement('span');
+    c.className = 'chip' + (w ? ' warn' : '');
+    c.textContent = t;
+    return c;
+  }));
 }
 
+/** Dibuja los objetos sobre el vídeo, que se muestra con object-fit: cover (recortado, sin deformar). */
 function drawOverlay(objects, W, H) {
   const c = $('overlay');
   if (!c || !W) return;
-  if (c.width !== W) { c.width = W; c.height = H; }
+  const dpr = window.devicePixelRatio || 1;
+  const cw = c.clientWidth, ch = c.clientHeight;
+  if (c.width !== Math.round(cw * dpr) || c.height !== Math.round(ch * dpr)) {
+    c.width = Math.round(cw * dpr);
+    c.height = Math.round(ch * dpr);
+  }
   const g = c.getContext('2d');
-  g.clearRect(0, 0, W, H);
-  g.lineWidth = 4;
-  g.font = 'bold 22px system-ui';
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, cw, ch);
+  const k = Math.max(cw / W, ch / H);
+  const ox = (cw - W * k) / 2, oy = (ch - H * k) / 2;
+  g.font = '700 15px system-ui, sans-serif';
+  g.lineWidth = 3;
+  g.lineJoin = 'round';
   for (const o of objects) {
     const [x, y, w, h] = o.bbox;
-    g.strokeStyle = o.inPath && o.obstacle ? '#ff3b30' : '#ffd60a';
-    g.strokeRect(x, y, w, h);
-    g.fillStyle = g.strokeStyle;
-    g.fillText(`${labels.name(o.cls)}${o.dist != null ? ' ' + o.dist.toFixed(1) + 'm' : ''}`, x + 4, Math.max(22, y - 6));
+    const X = ox + x * k, Y = oy + y * k, Wd = w * k, Ht = h * k;
+    const danger = o.inPath && o.obstacle && o.dist != null && o.dist < 2.5;
+    const col = danger ? '#ff453a' : o.inPath && o.obstacle ? '#ffd60a' : 'rgba(255,255,255,.85)';
+    g.strokeStyle = col;
+    g.beginPath();
+    g.roundRect ? g.roundRect(X, Y, Wd, Ht, 12) : g.rect(X, Y, Wd, Ht);
+    g.stroke();
+    const label = `${labels.name(o.cls)}${o.dist != null ? ' · ' + o.dist.toFixed(1) + ' m' : ''}`;
+    const tw = g.measureText(label).width + 16;
+    const ly = Math.min(ch - 28, Math.max(4, Y - 28));
+    const lx = Math.min(cw - tw - 4, Math.max(4, X));
+    g.fillStyle = col;
+    g.beginPath();
+    g.roundRect ? g.roundRect(lx, ly, tw, 24, 12) : g.rect(lx, ly, tw, 24);
+    g.fill();
+    g.fillStyle = danger ? '#fff' : '#111';
+    g.fillText(label, lx + 8, ly + 17);
   }
 }
 

@@ -4,6 +4,10 @@
 
 import * as labels from './labels.js';
 import { clockOf } from './geo.js';
+import { YoloDetector } from './detector.js';
+
+const YOLO_MODEL = new URL('../models/faro-detector-fp16.onnx', import.meta.url).href;
+const YOLO_NAMES = new URL('../models/faro-classes.json', import.meta.url).href;
 
 const TFJS = 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js';
 const COCO = 'https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js';
@@ -48,7 +52,8 @@ export class Vision extends EventTarget {
     if (this.stream) return;
     this.stream = await navigator.mediaDevices.getUserMedia({
       audio: false,
-      video: { facingMode: { ideal: 'environment' }, width: { ideal: 640 }, height: { ideal: 480 } },
+      // Sin forzar tamaño ni reescalar: así la imagen no se deforma.
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, resizeMode: { ideal: 'none' } },
     });
     this.video.srcObject = this.stream;
     this.track = this.stream.getVideoTracks()[0];
@@ -66,13 +71,26 @@ export class Vision extends EventTarget {
     this.track = null;
   }
 
+  /** Carga el detector: primero YOLO (puertas, escaleras…), si falla COCO-SSD. */
   async loadModel() {
     if (this.model) return;
+    try {
+      const names = await (await fetch(YOLO_NAMES)).json();
+      const yolo = new YoloDetector({ modelUrl: YOLO_MODEL, names, wanted: new Set(names.filter(labels.KNOWN)), size: 416, groupOf: labels.group });
+      await yolo.load();
+      this.model = { detect: (src, W, H) => yolo.detect(src, W, H, 0.35) };
+      this.kind = 'yolo-' + yolo.backend;
+      return;
+    } catch (e) {
+      console.warn('YOLO no disponible, uso COCO-SSD', e);
+    }
     await loadScript(TFJS);
     await loadScript(COCO);
     try { await window.tf.setBackend('webgl'); } catch {}
     await window.tf.ready();
-    this.model = await window.cocoSsd.load({ base: 'lite_mobilenet_v2' });
+    const coco = await window.cocoSsd.load({ base: 'lite_mobilenet_v2' });
+    this.model = { detect: (src) => coco.detect(src, 12, 0.45) };
+    this.kind = 'coco';
   }
 
   get ready() {
@@ -119,8 +137,10 @@ export class Vision extends EventTarget {
 
   async detectNow() {
     if (!this.model || this.video.readyState < 2) return this.last;
-    const preds = await this.model.detect(this.video, 12, 0.42);
     const W = this.video.videoWidth, H = this.video.videoHeight;
+    const t0 = performance.now();
+    const preds = await this.model.detect(this.video, W, H);
+    this.frameMs = performance.now() - t0;
     const pitch = this.getPitch();
     this.last = preds.map((p) => enrich(p, W, H, pitch));
     this.lastAt = Date.now();

@@ -11,7 +11,7 @@ servidor. Todo se calcula dentro del teléfono:
 |---|---|
 | Voz | Síntesis de voz del sistema (`speechSynthesis`); elige la voz local de mayor calidad |
 | Escucha | Reconocimiento de voz del navegador; usa el modo **en el dispositivo** cuando el navegador lo ofrece |
-| Obstáculos | TensorFlow.js + COCO‑SSD (80 tipos de objeto) ejecutado en el móvil |
+| Obstáculos | Detector YOLOE propio (puertas, escaleras, postes, farolas, personas, muebles, vehículos, paso de peatones…) ejecutado en el móvil con ONNX Runtime; el modelo viaja con la app |
 | Distancias | Geometría de la cámara: tamaño real del objeto + inclinación del teléfono |
 | Pasos | Acelerómetro con detección de picos y calibración |
 | Orientación | Brújula del teléfono (hacia dónde mira la cámara) |
@@ -45,7 +45,11 @@ Mientras caminas, Faro vigila un "pasillo" de unos 90 cm delante de ti:
 - **Aviso:** "Silla delante, a 3 pasos. Desvíate a la izquierda." (pitido en el lado del obstáculo)
 - **Alto:** "¡Alto! Persona justo delante." con vibración fuerte, también si algo se te acerca rápido.
 - **Vehículos** (coche, moto, bici, autobús): aviso desde unos 7 metros.
-- **Paredes lisas:** aviso aproximado cuando la imagen central no tiene textura mientras caminas.
+- **Escaleras:** "Cuidado: escaleras delante, a 5 pasos" y "¡Alto!" si estás muy cerca.
+- **Puertas, paso de peatones, semáforos:** se anuncian una vez, sin alarma.
+- **Sin repeticiones:** un objeto solo cuenta si aparece en varias imágenes seguidas, cada obstáculo
+  se anuncia una sola vez mientras siga ahí, y parado no te avisa salvo que algo venga hacia ti.
+- **Paredes lisas:** aviso aproximado y poco frecuente cuando la imagen central no tiene textura.
 - **Sónar** opcional: pitidos más rápidos cuanto más cerca, sonando del lado del obstáculo.
 
 ### Calibrar los pasos
@@ -65,7 +69,7 @@ npm test           # pruebas del lenguaje, la geometría y las rutas
 
 Para usarla en el móvil, publícala en cualquier hosting estático con HTTPS (por ejemplo
 GitHub Pages), ábrela en Chrome (Android) o Safari (iPhone) y elige **"Añadir a pantalla de inicio"**.
-La primera vez se descargan el detector (unos 5 MB) y, si lo activas, el modo inteligente.
+La primera vez se descargan el detector (unos 20 MB) y, si lo activas, el modo inteligente.
 Después todo funciona **sin conexión**.
 
 ## Modo inteligente (opcional)
@@ -84,8 +88,9 @@ Necesita un móvil reciente con WebGPU (Chrome en Android reciente).
   lugares guardados o siguiendo rutas que hayas grabado tú.
 - **El GPS falla en interior**: en casa se usan pasos + brújula, y la brújula puede desviarse cerca de
   metales o electrodomésticos.
-- **El detector solo reconoce 80 tipos de objetos** (personas, muebles, vehículos, animales…). No reconoce
-  puertas, escaleras, bordillos ni agujeros.
+- **El detector reconoce unas 40 categorías** elegidas para moverse (personas, puertas, escaleras, postes,
+  muebles, vehículos…). No ve bordillos, agujeros, cristales ni paredes lisas de forma fiable, y puede fallar
+  con poca luz. En móviles sin WebGPU analiza unas 2 imágenes por segundo.
 - **El reconocimiento de voz** solo funciona totalmente en el teléfono en navegadores que lo permiten
   (Chrome reciente). En otros, el navegador puede usar su propio servicio; puedes usar los botones o escribir.
 - La primera descarga del detector necesita internet (después queda guardado).

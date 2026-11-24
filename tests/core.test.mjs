@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import { parse, parseHeight, parseNumber, findBest } from '../js/intents.js';
 import * as geo from '../js/geo.js';
 import { RouteRecorder, reverseRoute, StepGuide } from '../js/navigator.js';
-import { classFromSpanish } from '../js/labels.js';
+import { classFromSpanish, pluralName, indef } from '../js/labels.js';
+import { Safety } from '../js/safety.js';
+import { decode, nms } from '../js/detector.js';
 import { parseReply } from '../js/brain.js';
 import { Store } from '../js/store.js';
 
@@ -132,7 +134,9 @@ test('reconocer nombres de objetos', () => {
   assert.equal(classFromSpanish('el sofá'), 'couch');
   assert.equal(classFromSpanish('coche'), 'car');
   assert.equal(classFromSpanish('frigorífico'), 'refrigerator');
-  assert.equal(classFromSpanish('puerta'), null);
+  assert.equal(classFromSpanish('puerta'), 'door');
+  assert.equal(classFromSpanish('las escaleras'), 'stairs');
+  assert.equal(classFromSpanish('ornitorrinco'), null);
 });
 
 test('respuesta del modo inteligente', () => {
@@ -152,4 +156,76 @@ test('memoria local', () => {
   assert.equal(s2.place('portal').lat, 1);
   assert.equal(s2.settings.stepLength, 0.71);
   assert.ok(s2.remove('portal'));
+});
+
+test('plurales y artículos', () => {
+  assert.equal(pluralName('truck'), 'camiones');
+  assert.equal(pluralName('bus'), 'autobuses');
+  assert.equal(indef('stairs'), 'unas escaleras');
+});
+
+function mkSafety(walking = true) {
+  const said = [];
+  const s = new Safety({
+    say: (t) => said.push(t), cue: { danger() {}, warn() {} }, sonar: { update() {} },
+    walking: () => walking, stepLength: () => 0.7, navigating: () => false,
+  });
+  return { s, said };
+}
+const obj = (cls, dist, extra = {}) => ({ cls, dist, angle: 0, clock: 12, inPath: true, obstacle: true, lateral: 0, ...extra });
+
+test('no repite el mismo aviso (anti-spam)', async () => {
+  const { s, said } = mkSafety();
+  for (let i = 0; i < 20; i++) { s.onDetections([obj('chair', 2.0)]); await new Promise((r) => setTimeout(r, 20)); }
+  assert.equal(said.length, 1);
+  assert.match(said[0], /Silla delante, a 3 pasos/);
+});
+
+test('un objeto visto en una sola imagen no genera aviso', () => {
+  const { s, said } = mkSafety();
+  s.onDetections([obj('person', 1.0)]);
+  s.onDetections([]);
+  assert.equal(said.length, 0);
+});
+
+test('parado no avisa de objetos quietos', () => {
+  const { s, said } = mkSafety(false);
+  for (let i = 0; i < 6; i++) s.onDetections([obj('chair', 1.0)]);
+  assert.equal(said.length, 0);
+});
+
+test('peligro y escaleras', () => {
+  const a = mkSafety();
+  for (let i = 0; i < 4; i++) a.s.onDetections([obj('person', 0.9)]);
+  assert.equal(a.said.length, 1);
+  assert.match(a.said[0], /Alto! Persona/);
+  const b = mkSafety();
+  for (let i = 0; i < 4; i++) b.s.onDetections([obj('stairs', 3.0)]);
+  assert.match(b.said[0], /escaleras delante/);
+  const c = mkSafety();
+  for (let i = 0; i < 4; i++) c.s.onDetections([obj('door', 2.0)]);
+  assert.match(c.said[0], /^Puerta delante/);
+});
+
+test('decodificar YOLO y NMS', () => {
+  // 2 clases, 3 anclas; formato [4 + C, N]
+  const N = 3, C = 2;
+  const out = new Float32Array((4 + C) * N);
+  const set = (row, i, v) => { out[row * N + i] = v; };
+  // ancla 0: puerta (clase 1) 0.9 ; ancla 1: casi igual 0.7 ; ancla 2: persona (clase 0) 0.2
+  [[100, 100, 50, 100], [102, 101, 50, 100], [300, 300, 40, 40]].forEach(([cx, cy, w, h], i) => {
+    set(0, i, cx); set(1, i, cy); set(2, i, w); set(3, i, h);
+  });
+  set(5, 0, 0.9); set(5, 1, 0.7); set(4, 2, 0.2);
+  const wanted = new Map([[0, 'Person'], [1, 'door']]);
+  const dets = nms(decode(out, C, N, wanted, 0.3, { scale: 0.5, dx: 0, dy: 0 }));
+  assert.equal(dets.length, 1);
+  assert.equal(dets[0].class, 'door');
+  assert.deepEqual(dets[0].bbox, [150, 100, 100, 200]);
+});
+
+test('paso de peatones se anuncia una vez', () => {
+  const { s, said } = mkSafety();
+  for (let i = 0; i < 8; i++) s.onDetections([obj('crosswalk', 5, { obstacle: false, inPath: false })]);
+  assert.deepEqual(said, ['Paso de peatones delante.']);
 });
