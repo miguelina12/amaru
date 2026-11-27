@@ -7,7 +7,27 @@ App web instalable (PWA) para controlar un patín eléctrico desde el móvil:
 - **Encender y apagar** el patín (apagar pide confirmación: hazlo solo parado).
 - Velocímetro en vivo si el patín envía su velocidad, consola Bluetooth y **modo Demo** sin patín.
 
-## Cómo abrirla
+## APK para Android
+
+Cada vez que se sube un cambio a `patin/` o `patin-app/`, GitHub Actions compila el APK
+(flujo `.github/workflows/patin-apk.yml`) y lo deja en **Releases** como `AmaruPatin.apk`.
+
+1. Abre en el móvil la página *Releases* del repositorio y descarga `AmaruPatin.apk`.
+2. Ábrelo y permite *Instalar apps de origen desconocido* para tu navegador.
+3. Al abrir la app y pulsar **Conectar**, acepta el permiso de *Dispositivos cercanos* (Bluetooth).
+
+El APK usa Bluetooth nativo (plugin `@capacitor-community/bluetooth-le`), así que funciona en cualquier
+Android 6 o superior. Las versiones nuevas se instalan encima de la anterior porque todas van firmadas
+con la misma clave (`patin-app/android/app/patin.keystore`; es pública, solo sirve para instalar a mano, no para Google Play).
+
+Compilarlo en tu ordenador (con Android Studio o el SDK instalado):
+
+```
+cd patin-app && npm ci && npm run apk
+# → patin-app/android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+## Cómo abrirla en el navegador
 
 Necesita **HTTPS** y un navegador con Bluetooth web: **Chrome en Android, Windows, macOS o Linux**.
 En iPhone Safari no tiene Bluetooth web; usa el navegador *Bluefy*.

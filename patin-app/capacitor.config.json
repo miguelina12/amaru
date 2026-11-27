@@ -1,0 +1,16 @@
+{
+  "appId": "com.amaru.patin",
+  "appName": "Amaru Patín",
+  "webDir": "../patin",
+  "android": { "allowMixedContent": false },
+  "plugins": {
+    "BluetoothLe": {
+      "displayStrings": {
+        "scanning": "Buscando patines…",
+        "cancel": "Cancelar",
+        "availableDevices": "Patines cerca",
+        "noDeviceFound": "No se encontró ningún patín"
+      }
+    }
+  }
+}

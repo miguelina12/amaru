@@ -1,0 +1,53 @@
+# Compila el APK de Android de la app del patín y lo publica en la página de "Releases".
+name: APK del patín
+
+on:
+  push:
+    paths: ["patin/**", "patin-app/**", ".github/workflows/patin-apk.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: patin-apk
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: patin-app/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+      - name: Dependencias y copia de la web al proyecto Android
+        working-directory: patin-app
+        run: |
+          npm ci
+          npx cap sync android
+      - name: Compilar APK
+        working-directory: patin-app/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+          cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/AmaruPatin.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AmaruPatin-apk
+          path: AmaruPatin.apk
+      - name: Publicar en Releases (enlace fijo para descargar desde el móvil)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="patin-apk-${GITHUB_REF_NAME//\//-}"
+          NOTES="APK de Amaru Patín (rama ${GITHUB_REF_NAME}, compilación ${GITHUB_RUN_NUMBER}). Descarga AmaruPatin.apk en el móvil y ábrelo para instalar."
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$TAG" AmaruPatin.apk --target "$GITHUB_SHA" --title "Amaru Patín APK (${GITHUB_REF_NAME})" --notes "$NOTES" --prerelease

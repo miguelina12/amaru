@@ -3,7 +3,87 @@ import { bytesToHex, TRANSPORTS } from './protocols.js';
 
 const CHUNK = 20; // tamaño seguro de paquete BLE (MTU por defecto)
 
-export const bluetoothAvailable = () => typeof navigator !== 'undefined' && !!navigator.bluetooth;
+// Dentro del APK (Capacitor) no hay Bluetooth web: se usa el plugin Bluetooth nativo.
+export const isNativeApp = () => !!globalThis.Capacitor?.isNativePlatform?.();
+export const bluetoothAvailable = () => isNativeApp() || (typeof navigator !== 'undefined' && !!navigator.bluetooth);
+
+const toHex = (bytes) => Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+const fromNative = (v) => {
+  if (typeof v === 'string') return Uint8Array.from((v.replace(/[^0-9a-f]/gi, '').match(/../g) || []).map((h) => parseInt(h, 16)));
+  if (v instanceof DataView) return new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
+  return new Uint8Array(0);
+};
+
+export class NativeBleLink {
+  constructor() {
+    this.ble = globalThis.Capacitor.registerPlugin('BluetoothLe');
+    this.onData = () => {};
+    this.onClose = () => {};
+    this.deviceId = null;
+    this.listeners = [];
+    this.name = '';
+  }
+
+  async connect(profile) {
+    const ble = this.ble;
+    await ble.initialize({ androidNeverForLocation: true });
+    const { value: on } = await ble.isEnabled();
+    if (!on) {
+      try { await ble.requestEnable(); } catch { throw new Error('Activa el Bluetooth del móvil'); }
+    }
+    const optionalServices = [...new Set([profile.service, ...Object.values(TRANSPORTS).map((t) => t.service)])];
+    const opts = { optionalServices };
+    if (profile.namePrefix) opts.namePrefix = profile.namePrefix;
+    let device;
+    try {
+      device = await ble.requestDevice(opts);
+    } catch (e) {
+      const err = new Error(/cancel/i.test(e.message) ? 'No se eligió ningún patín' : e.message);
+      err.name = 'NotFoundError';
+      throw err;
+    }
+    this.deviceId = device.deviceId;
+    this.name = device.name || 'Patín';
+    this.profile = profile;
+    this.listeners.push(await ble.addListener(`disconnected|${this.deviceId}`, () => { this.deviceId = null; this.onClose(); }));
+    await ble.connect({ deviceId: this.deviceId, timeout: 15000 });
+    const { services = [] } = await ble.getServices({ deviceId: this.deviceId }).catch(() => ({}));
+    const svc = services.find((s) => s.uuid.toLowerCase() === profile.service);
+    if (services.length && !svc) {
+      const list = services.map((s) => s.uuid).join(', ');
+      await ble.disconnect({ deviceId: this.deviceId }).catch(() => {});
+      throw new Error(`El patín no tiene el servicio configurado. Servicios encontrados: ${list}`);
+    }
+    if (profile.notify) {
+      try {
+        const base = { deviceId: this.deviceId, service: profile.service, characteristic: profile.notify };
+        this.listeners.push(await ble.addListener(`notification|${this.deviceId}|${profile.service}|${profile.notify}`,
+          (ev) => this.onData(fromNative(ev?.value))));
+        await ble.startNotifications(base);
+      } catch { /* sin notificaciones */ }
+    }
+    return this.name;
+  }
+
+  async send(bytes) {
+    if (!this.deviceId) throw new Error('No hay ningún patín conectado');
+    const base = { deviceId: this.deviceId, service: this.profile.service, characteristic: this.profile.write };
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      const value = toHex(bytes.slice(i, i + CHUNK));
+      if (this.profile.withResponse) await this.ble.write({ ...base, value });
+      else await this.ble.writeWithoutResponse({ ...base, value });
+    }
+  }
+
+  disconnect() {
+    const id = this.deviceId;
+    this.listeners.forEach((l) => l.remove?.());
+    this.listeners = [];
+    if (id) this.ble.disconnect({ deviceId: id }).catch(() => {});
+    this.deviceId = null;
+    this.onClose();
+  }
+}
 
 export class BleLink {
   constructor() {

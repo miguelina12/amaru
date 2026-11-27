@@ -1,6 +1,6 @@
 import { MAX_SPEED, clampSpeed, buildCommand, bytesToHex, hexToBytes, TRANSPORTS, CHECKSUMS, COMMANDS,
   normalizeProfile, parseTelemetry } from './protocols.js';
-import { BleLink, DemoLink, bluetoothAvailable } from './ble.js';
+import { BleLink, NativeBleLink, DemoLink, bluetoothAvailable, isNativeApp } from './ble.js';
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
@@ -59,7 +59,7 @@ function setConnected(on) {
 
 async function connect(useDemo) {
   if (state.link) { state.link.disconnect(); return; }
-  const link = useDemo ? new DemoLink() : new BleLink();
+  const link = useDemo ? new DemoLink() : isNativeApp() ? new NativeBleLink() : new BleLink();
   link.onData = onData;
   link.onClose = () => { state.link = null; setConnected(false); setPower(false); setStatus('Desconectado'); log('Desconectado'); };
   setStatus(useDemo ? 'Iniciando demostración…' : 'Buscando patín…');
@@ -203,7 +203,12 @@ $('#save').addEventListener('click', () => {
   fillSettings();
   setStatus(state.link ? 'Ajustes guardados (reconecta si cambiaste los UUID)' : 'Ajustes guardados', 'ok');
 });
-$('#export').addEventListener('click', () => {
+$('#export').addEventListener('click', async () => {
+  if (isNativeApp()) { // en el APK no hay descargas: se copia al portapapeles
+    try { await navigator.clipboard.writeText(JSON.stringify(readSettings(), null, 2)); setStatus('Perfil copiado al portapapeles', 'ok'); }
+    catch { setStatus('No se pudo copiar el perfil', 'err'); }
+    return;
+  }
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([JSON.stringify(readSettings(), null, 2)], { type: 'application/json' }));
   a.download = 'perfil-patin.json';
@@ -232,4 +237,4 @@ setConnected(false);
 drawArc('#arc-speed', 0);
 if (!bluetoothAvailable()) setStatus('Sin Bluetooth web en este navegador: usa Chrome (Android/PC) o prueba la Demo', 'warn');
 if (!Object.values(profile.commands).some(Boolean)) log('Configura los comandos de tu patín en «Ajustes del patín», o prueba la Demo.');
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+if (!isNativeApp() && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
