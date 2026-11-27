@@ -96,7 +96,7 @@ export class Safety {
     // Referencias (paso de peatones, semáforo): una vez por encuentro, solo caminando.
     if (moving && now - this.lastWarn > WARN_GAP_MS) {
       for (const t of this.tracks.values()) {
-        if (t.warned || t.hits < this.confirm || !labels.LANDMARKS.has(t.obj.cls) || t.d > 12) continue;
+        if (t.warned || t.hits < this.confirm || !labels.LANDMARKS.has(t.obj.cls) || t.d > 6) continue;
         if (t.obj.obstacle && t.obj.inPath) continue; // ese ya lo avisa la parte de obstáculos
         if (Math.abs(t.obj.angle) > 25) continue;
         t.warned = true;
@@ -117,7 +117,7 @@ export class Safety {
       const nm = labels.cap(labels.spoken(o));
 
       // PELIGRO
-      if (t.d < (hazard ? 1.6 : 1.2) || approaching) {
+      if (t.d < (hazard ? 1.4 : 1.0) || approaching) {
         if (now - t.dangerAt < DANGER_REPEAT_MS) return;
         t.dangerAt = now;
         t.warned = true;
@@ -125,7 +125,7 @@ export class Safety {
         this.ctx.cue.danger(pan);
         let msg;
         if (hazard) msg = `¡Alto! ${nm} justo delante.`;
-        else if (approaching && t.d >= 1.2) msg = `¡Cuidado! ${nm} viene hacia ti.`;
+        else if (approaching && t.d >= 1.0) msg = `¡Cuidado! ${nm} viene hacia ti.`;
         else {
           msg = `¡Alto! ${nm} delante.`;
           const side = this.freeSide(objects);
@@ -136,7 +136,8 @@ export class Safety {
       }
 
       // AVISO (una sola vez por encuentro)
-      const warnAt = hazard ? 4 : vehicle ? 6 : 2.5;
+      // Aviso a unos 2 m (escaleras y vehículos con algo más de margen)
+      const warnAt = hazard ? 3 : vehicle ? 4 : 2;
       if (t.d < warnAt && !t.warned) {
         if (now - this.lastWarn < WARN_GAP_MS) return;
         t.warned = true;

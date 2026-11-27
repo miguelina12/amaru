@@ -45,7 +45,8 @@ Mientras caminas, Faro vigila un "pasillo" de unos 90 cm delante de ti:
 
 - **Aviso:** "Silla delante, a 3 pasos. Desvíate a la izquierda." (pitido en el lado del obstáculo)
 - **Alto:** "¡Alto! Persona justo delante." con vibración fuerte, también si algo se te acerca rápido.
-- **Vehículos** (coche, moto, bici, autobús): aviso desde unos 7 metros.
+- **Cuándo avisa:** a unos **2 metros** (3 pasos) si está en tu camino; escaleras a 3 m y vehículos a 4 m.
+  Lo que está más lejos o a un lado no se avisa.
 - **Sentido común:** si duda entre dos cosas parecidas lo dice ("un perro o un gato"); los animales salvajes
   solo se anuncian si está muy seguro; descarta tamaños y formas imposibles y cosas fuera de lugar.
 - **Escaleras:** "Cuidado: escaleras delante, a 5 pasos" y "¡Alto!" si estás muy cerca.
@@ -77,9 +78,10 @@ Después todo funciona **sin conexión**.
 
 ## Modo inteligente (opcional)
 
-Di "activa el modo inteligente" para descargar un modelo de lenguaje pequeño
-(Qwen2.5‑1.5B, ~1 GB) que se ejecuta **dentro del teléfono** con WebLLM y WebGPU. Sirve para
-entender frases libres ("tengo hambre, ¿me llevas a la cocina?") y conversar.
+Di "activa el modo inteligente" (o tócalo en Ajustes) para descargar un modelo de lenguaje que se ejecuta
+**dentro del teléfono** con WebLLM y WebGPU: Qwen3‑4B (~2,5 GB) en móviles con 6 GB de memoria o más, y
+Qwen3‑1.7B (~1 GB) en el resto. Entiende frases libres ("tengo hambre, ¿me llevas a la cocina?"), recuerda
+lo último que hablasteis y conversa. Si Faro no te entiende, te ofrece activarlo.
 Necesita un móvil reciente con WebGPU (Chrome en Android reciente).
 
 ## Límites (dicho con honestidad)

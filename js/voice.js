@@ -150,16 +150,19 @@ export class Listener {
     return this.local;
   }
 
-  /** Escucha una frase. Resuelve con la lista de transcripciones posibles (la mejor primero) o null. */
-  listen({ timeoutMs = 9000 } = {}) {
+  /**
+   * Escucha hasta que terminas la frase (no corta en la primera pausa).
+   * onPartial(texto) recibe lo que va oyendo. Resuelve con transcripciones posibles (la mejor primero) o null.
+   */
+  listen({ timeoutMs = 15000, silenceMs = 1600, onPartial } = {}) {
     return new Promise((resolve, reject) => {
       if (!this.SR) return reject(new Error('unsupported'));
       this.abort();
       const rec = new this.SR();
       this.rec = rec;
       rec.lang = this.lang;
-      rec.interimResults = false;
-      rec.continuous = false;
+      rec.interimResults = true;
+      rec.continuous = true;
       rec.maxAlternatives = 5;
       try {
         // Pistas de vocabulario (solo navegadores que lo admiten)
@@ -171,27 +174,40 @@ export class Listener {
         if ('processLocally' in rec) rec.processLocally = true;
         else if ('mode' in rec) rec.mode = 'ondevice-only';
       }
-      let done = false;
+      let done = false, best = null, silence = null;
       const finish = (v, err) => {
         if (done) return;
         done = true;
         clearTimeout(timer);
+        clearTimeout(silence);
         this.rec = null;
+        try { rec.abort(); } catch {}
         err ? reject(err) : resolve(v);
       };
-      const timer = setTimeout(() => { try { rec.stop(); } catch {} }, timeoutMs);
+      const timer = setTimeout(() => finish(best), timeoutMs);
       rec.onresult = (e) => {
-        const res = e.results[0];
+        // Frase completa = segmentos anteriores + variantes del último segmento
+        let head = '', interim = '';
+        const n = e.results.length;
+        for (let i = 0; i < n - 1; i++) head += e.results[i][0].transcript + ' ';
+        const last = e.results[n - 1];
         const alts = [];
-        for (let i = 0; i < res.length; i++) alts.push(res[i]);
+        for (let i = 0; i < last.length; i++) alts.push(last[i]);
         alts.sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
-        finish(alts.map((a) => a.transcript.trim()).filter(Boolean));
+        const full = alts.map((a) => (head + a.transcript).replace(/\s+/g, ' ').trim()).filter(Boolean);
+        if (last.isFinal) best = full;
+        else interim = full[0] || '';
+        onPartial?.(last.isFinal ? full[0] : interim);
+        if (!best && interim) best = [interim];
+        clearTimeout(silence);
+        // Si dejas de hablar un momento, damos la frase por terminada
+        silence = setTimeout(() => finish(best), last.isFinal ? silenceMs * 0.6 : silenceMs);
       };
       rec.onerror = (e) => {
-        if (e.error === 'no-speech' || e.error === 'aborted') finish(null);
-        else finish(null, new Error(e.error));
+        if (e.error === 'no-speech' || e.error === 'aborted') finish(best);
+        else finish(best, best ? null : new Error(e.error));
       };
-      rec.onend = () => finish(null);
+      rec.onend = () => finish(best);
       try { rec.start(); } catch (e) { finish(null, e); }
     });
   }

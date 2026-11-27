@@ -254,6 +254,7 @@ $('tglSonar').addEventListener('click', () => handle(S.sonar ? 'desactiva el só
 $('tglHands').addEventListener('click', () => { openSettings(false); handle(S.handsFree ? 'desactiva manos libres' : 'activa manos libres'); });
 $('tglTorch').addEventListener('click', () => handle(vision.torchOn ? 'apaga la linterna' : 'enciende la linterna').then(updateInfo));
 $('checksBox').addEventListener('toggle', updateInfo);
+$('tglBrain').addEventListener('click', () => { openSettings(false); handle(brain.ready || S.brain ? 'desactiva el modo inteligente' : 'activa el modo inteligente'); });
 $('tglCam').addEventListener('click', () => { $('camwrap').classList.toggle('off'); updateInfo(); });
 $('typeForm').addEventListener('submit', (e) => {
   e.preventDefault();
@@ -274,7 +275,7 @@ async function listenOnce() {
   $('talkHint').textContent = 'habla ahora';
   audio.cue.listen();
   try {
-    const alts = await listener.listen();
+    const alts = await listener.listen({ onPartial: (t) => { const el = $('heard'); if (el) el.textContent = t ? `«${t}…»` : ''; } });
     audio.cue.heard();
     if (alts?.length) await handle(alts);
     else say('No te he oído. Toca otra vez y habla.', { remember: false });
@@ -338,6 +339,14 @@ async function handle(raw) {
     const a = app.awaiting;
     app.awaiting = null;
     return a.resolve(cmd, raw);
+  }
+
+  // No lo entiendo y el teléfono puede con el modo inteligente: lo ofrezco (una vez por sesión)
+  if (cmd.intent === 'unknown' && !cmd.suggestion && !brain.ready && !brain.loading && Brain.supported && !app.brainOffered) {
+    app.brainOffered = true;
+    say('No te he entendido. Si activo el modo inteligente, entenderé frases libres y podremos conversar, sin internet después de descargarlo una vez. ¿Lo activo? Di sí o no.');
+    app.awaiting = { resolve: (c) => (c.intent === 'yes' ? enableBrain() : say('Vale. Puedes activarlo cuando quieras en Ajustes.')) };
+    return;
   }
 
   if (cmd.intent === 'unknown' && cmd.suggestion && !brain.ready) {
@@ -711,7 +720,7 @@ const handlers = {
   slower() { S.rate = Math.max(0.6, +(S.rate - 0.15).toFixed(2)); store.save(); say('Así hablo más despacio.'); },
   next_voice() { const n = voice.nextVoice(); say(n ? `Ahora hablo con la voz ${n}. ¿Te gusta?` : 'Solo tengo una voz en español en este teléfono.'); },
   brain_on() { enableBrain(); },
-  brain_off() { S.brain = false; store.save(); say('Modo inteligente desactivado para la próxima vez.'); },
+  brain_off() { S.brain = false; store.save(); try { brain.engine?.unload?.(); } catch {} brain.engine = null; brain.history = []; say('Modo inteligente desactivado.'); updateInfo(); },
   handsfree_on() {
     S.handsFree = true; store.save();
     say('Manos libres activado. Empieza tus órdenes diciendo "Faro", por ejemplo: Faro, qué hay delante.');
@@ -851,7 +860,7 @@ function avg(ps) {
 async function enableBrain(silent = false) {
   if (!Brain.supported) return say('Este teléfono no admite el modo inteligente, porque su navegador no tiene WebGPU. Sigo entendiendo las órdenes normales.');
   if (brain.ready) return say('El modo inteligente ya está activo.');
-  if (!silent) say('Activando el modo inteligente. La primera vez descargo un modelo de alrededor de un giga, que después funciona sin conexión y sin enviar nada fuera del teléfono. Te aviso cuando esté listo.');
+  if (!silent) say('Activando el modo inteligente. La primera vez descargo un modelo de entre uno y dos gigas y medio, según tu teléfono, que después funciona sin conexión y sin enviar nada fuera del teléfono. Te aviso cuando esté listo.');
   let lastPct = -1;
   try {
     await brain.load((pr) => {
@@ -886,6 +895,7 @@ function updateInfo() {
   set('tglSonar', S.sonar);
   set('tglHands', S.handsFree);
   set('tglTorch', vision.torchOn);
+  set('tglBrain', brain.ready || brain.loading);
   set('tglCam', !$('camwrap')?.classList.contains('off'));
 
   const ul = $('checks');
@@ -900,6 +910,8 @@ function updateInfo() {
     [gpsOk ? 'ok' : 'meh', 'GPS', gpsOk ? `precisión ±${Math.round(p.acc)} m` : 'buscando señal (en casa es normal)'],
     [compass.heading != null ? 'ok' : 'no', 'Brújula', compass.heading != null ? 'sí' : 'no da datos'],
     [app.motionOk !== false ? 'ok' : 'no', 'Contador de pasos', app.motionOk !== false ? 'sí' : 'sin permiso de movimiento'],
+    [brain.ready ? 'ok' : Brain.supported ? 'meh' : 'no', 'Modo inteligente',
+      brain.ready ? `activo (${brain.model.split('-q4')[0]})` : brain.loading ? 'descargando…' : Brain.supported ? 'apagado; actívalo en Ajustes' : 'este navegador no tiene WebGPU'],
     [app.map ? 'ok' : 'meh', 'Mapa de calles', app.map ? 'descargado' : 'no; di "descarga el mapa"'],
     ['wakeLock' in navigator ? 'ok' : 'meh', 'Pantalla encendida', 'wakeLock' in navigator ? 'sí' : 'puede apagarse sola'],
   ];

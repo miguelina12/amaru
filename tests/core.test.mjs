@@ -177,9 +177,15 @@ function mkSafety(walking = true) {
 }
 const obj = (cls, dist, extra = {}) => ({ cls, dist, angle: 0, clock: 12, inPath: true, obstacle: true, lateral: 0, ...extra });
 
+test('no avisa de lo que está lejos (más de 2 m)', () => {
+  const { s, said } = mkSafety();
+  for (let i = 0; i < 6; i++) s.onDetections([obj('chair', 3.0)]);
+  assert.equal(said.length, 0);
+});
+
 test('no repite el mismo aviso (anti-spam)', async () => {
   const { s, said } = mkSafety();
-  for (let i = 0; i < 20; i++) { s.onDetections([obj('chair', 2.0)]); await new Promise((r) => setTimeout(r, 20)); }
+  for (let i = 0; i < 20; i++) { s.onDetections([obj('chair', 1.8)]); await new Promise((r) => setTimeout(r, 20)); }
   assert.equal(said.length, 1);
   assert.match(said[0], /Silla delante, a 3 pasos/);
 });
@@ -203,10 +209,10 @@ test('peligro y escaleras', () => {
   assert.equal(a.said.length, 1);
   assert.match(a.said[0], /Alto! Persona/);
   const b = mkSafety();
-  for (let i = 0; i < 4; i++) b.s.onDetections([obj('stairs', 3.0)]);
+  for (let i = 0; i < 4; i++) b.s.onDetections([obj('stairs', 2.8)]);
   assert.match(b.said[0], /escaleras delante/);
   const c = mkSafety();
-  for (let i = 0; i < 4; i++) c.s.onDetections([obj('door', 2.0)]);
+  for (let i = 0; i < 4; i++) c.s.onDetections([obj('door', 1.8)]);
   assert.match(c.said[0], /^Puerta delante/);
 });
 
@@ -242,7 +248,7 @@ test('sentido común: un coche aparcado no "viene hacia ti" cuando eres tú quie
     walking: () => true, speed: () => 1.2, stepLength: () => 0.7, navigating: () => false,
   });
   // caminas a 1,2 m/s hacia un coche quieto: la distancia baja 1,2 m cada segundo
-  let d = 7;
+  let d = 5;
   for (let i = 0; i < 12; i++) {
     s.onDetections([obj('car', d)]);
     await new Promise((r) => setTimeout(r, 100));
