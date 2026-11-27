@@ -1,10 +1,10 @@
 // Service worker: guarda la app y el detector en el teléfono para que funcione sin conexión.
-const VERSION = 'faro-v8';
+const VERSION = 'faro-v9';
 const MODELS = 'faro-models-v2'; // aparte, para no volver a descargar el modelo al actualizar la app
 const SHELL = [
   './', 'index.html', 'css/styles.css', 'manifest.webmanifest', 'icons/icon.svg',
   'js/app.js', 'js/voice.js', 'js/audio.js', 'js/sensors.js', 'js/store.js', 'js/navigator.js',
-  'js/vision.js', 'js/detector.js', 'js/safety.js', 'js/plausibility.js', 'js/map.js', 'js/vocab.js', 'js/intents.js', 'js/labels.js', 'js/geo.js', 'js/brain.js',
+  'js/vision.js', 'js/detector.js', 'js/safety.js', 'js/plausibility.js', 'js/map.js', 'js/vocab.js', 'js/intents.js', 'js/labels.js', 'js/geo.js', 'js/brain.js', 'js/claude.js', 'js/vendor/anthropic-sdk-1.4.0.mjs',
 ];
 
 self.addEventListener('install', (e) => {

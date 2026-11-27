@@ -13,6 +13,7 @@ const DEFAULTS = {
     sonar: false,
     brain: false,
     handsFree: false,
+    claudeKey: '', // clave de API de Anthropic (opcional, solo en este teléfono)
     sensitivity: 1,
   },
   places: {},

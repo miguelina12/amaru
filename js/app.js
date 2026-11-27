@@ -9,6 +9,7 @@ import { Vision } from './vision.js';
 import { Safety } from './safety.js';
 import { parse, parseBest, INTENT_DESC, findBest, cleanName, hasWake, stripWake, normalize } from './intents.js';
 import { Brain } from './brain.js';
+import { Claude, claudeProblem } from './claude.js';
 import * as geo from './geo.js';
 import * as labels from './labels.js';
 import { MapData, MapGuide, download as downloadMap, saveMap, loadMap, withArticle as withArt } from './map.js';
@@ -25,6 +26,7 @@ const gps = new Gps();
 const vision = new Vision($('video'), () => compass.pitch);
 const sonar = new audio.Sonar();
 const brain = new Brain();
+const claude = new Claude(() => S.claudeKey);
 
 const app = {
   nav: null, // StepGuide | GpsGuide
@@ -254,6 +256,26 @@ $('tglSonar').addEventListener('click', () => handle(S.sonar ? 'desactiva el só
 $('tglHands').addEventListener('click', () => { openSettings(false); handle(S.handsFree ? 'desactiva manos libres' : 'activa manos libres'); });
 $('tglTorch').addEventListener('click', () => handle(vision.torchOn ? 'apaga la linterna' : 'enciende la linterna').then(updateInfo));
 $('checksBox').addEventListener('toggle', updateInfo);
+$('keyForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const v = $('keyIn').value.trim();
+  $('keyIn').value = '';
+  if (!v) return;
+  if (!/^sk-ant-/.test(v)) return say('Eso no parece una clave de Anthropic. Empieza por s k guion a n t.');
+  S.claudeKey = v;
+  store.save();
+  app.keyHinted = true;
+  openSettings(false);
+  updateInfo();
+  say('Clave guardada. Ahora te entenderá Claude cuando haya internet. Prueba a decir: mira bien.');
+});
+$('keyDel').addEventListener('click', () => {
+  S.claudeKey = '';
+  store.save();
+  claude.history = [];
+  updateInfo();
+  say('Clave borrada. Te entiendo solo con lo que hay en el teléfono.');
+});
 $('tglBrain').addEventListener('click', () => { openSettings(false); handle(brain.ready || S.brain ? 'desactiva el modo inteligente' : 'activa el modo inteligente'); });
 $('tglCam').addEventListener('click', () => { $('camwrap').classList.toggle('off'); updateInfo(); });
 $('typeForm').addEventListener('submit', (e) => {
@@ -311,6 +333,18 @@ async function handsFreeLoop() {
   }
 }
 
+/** Foto actual de la cámara en JPEG (base64), como mucho 1024 px de lado. */
+function snapshot() {
+  const v = vision.video;
+  if (!v || v.readyState < 2 || !v.videoWidth) return null;
+  const k = Math.min(1, 1024 / Math.max(v.videoWidth, v.videoHeight));
+  const c = document.createElement('canvas');
+  c.width = Math.round(v.videoWidth * k);
+  c.height = Math.round(v.videoHeight * k);
+  c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', 0.8).split(',')[1];
+}
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ------------------------------------------------------------------ cerebro: interpretar órdenes
@@ -325,6 +359,8 @@ function brainState() {
     rumbo: compass.heading != null ? geo.cardinal(compass.heading) : null,
     gps: gps.last ? Math.round(gps.last.acc) + ' m de precisión' : 'sin señal',
     pasos: ped.count,
+    calle: (() => { const p = gps.last; const st = p && app.map?.covers(p) ? app.map.streetAt(p) : null; return st?.name || null; })(),
+    hora: new Date().toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' }),
   };
 }
 
@@ -339,6 +375,28 @@ async function handle(raw) {
     const a = app.awaiting;
     app.awaiting = null;
     return a.resolve(cmd, raw);
+  }
+
+  // Claude (por internet, con tu clave): para lo que las reglas no entienden con seguridad
+  if ((cmd.intent === 'unknown' || cmd.fuzzy) && claude.hasKey) {
+    if (!claude.online) {
+      if (!app.offlineSaid) { app.offlineSaid = true; say(claudeProblem('offline'), { priority: 'low' }); }
+    } else {
+      try {
+        const r = await claude.interpret(raw, brainState());
+        if (r.say) say(r.say);
+        if (r.intent === 'none') return;
+        if (['navigate', 'find', 'where_is', 'save_place', 'record_route'].includes(r.intent) && !r.name) return;
+        if (r.intent === 'look') return handlers.look({ text: normalize(raw), question: raw });
+        return run({ ...r, name: r.name && cleanName(r.name), text: normalize(raw) });
+      } catch (e) {
+        say(claudeProblem(e.code));
+      }
+    }
+  } else if (cmd.intent === 'unknown' && !app.keyHinted) {
+    // Sin clave: lo decimos una vez, y seguimos con lo que hay en el teléfono
+    app.keyHinted = true;
+    say('Si pones tu clave de Claude en Ajustes, te entenderé mucho mejor y podremos conversar.', { priority: 'low' });
   }
 
   // No lo entiendo y el teléfono puede con el modo inteligente: lo ofrezco (una vez por sesión)
@@ -654,6 +712,25 @@ const handlers = {
     say('Veo ' + joinY(parts) + '.');
   },
 
+  /** Descripción detallada con Claude: lee carteles, colores, por dónde pasar… */
+  async look(cmd = {}) {
+    if (!vision.stream) return say('La cámara está apagada.');
+    if (!claude.hasKey) { say(claudeProblem('nokey')); return handlers.describe(); }
+    if (!claude.online) { say(claudeProblem('offline')); return handlers.describe(); }
+    const img = snapshot();
+    if (!img) return say('Todavía no tengo imagen de la cámara. Espera un momento.');
+    say('Mirando.', { priority: 'low', remember: false });
+    audio.cue.listen?.();
+    try {
+      const st = brainState();
+      const text = await claude.look(img, cmd.question || '', { delante: st.delante, calle: st.calle, rumbo: st.rumbo });
+      say(text || 'No he podido describir la imagen.');
+    } catch (e) {
+      say(claudeProblem(e.code));
+      return handlers.describe();
+    }
+  },
+
   find(cmd) {
     const cls = labels.classFromSpanish(cmd.name);
     if (!cls) {
@@ -896,6 +973,9 @@ function updateInfo() {
   set('tglHands', S.handsFree);
   set('tglTorch', vision.torchOn);
   set('tglBrain', brain.ready || brain.loading);
+  const ks = $('keyState');
+  if (ks) ks.textContent = claude.hasKey ? `Clave guardada (…${S.claudeKey.slice(-4)}).` : 'Sin clave: Faro funciona solo con lo que hay en el teléfono.';
+  if ($('keyDel')) $('keyDel').hidden = !claude.hasKey;
   set('tglCam', !$('camwrap')?.classList.contains('off'));
 
   const ul = $('checks');
@@ -910,6 +990,8 @@ function updateInfo() {
     [gpsOk ? 'ok' : 'meh', 'GPS', gpsOk ? `precisión ±${Math.round(p.acc)} m` : 'buscando señal (en casa es normal)'],
     [compass.heading != null ? 'ok' : 'no', 'Brújula', compass.heading != null ? 'sí' : 'no da datos'],
     [app.motionOk !== false ? 'ok' : 'no', 'Contador de pasos', app.motionOk !== false ? 'sí' : 'sin permiso de movimiento'],
+    [claude.ready ? 'ok' : claude.hasKey ? 'meh' : 'no', 'Claude (por internet)',
+      claude.ready ? 'activo con tu clave' : claude.hasKey ? 'clave puesta, pero sin internet' : 'sin clave; ponla en Ajustes'],
     [brain.ready ? 'ok' : Brain.supported ? 'meh' : 'no', 'Modo inteligente',
       brain.ready ? `activo (${brain.model.split('-q4')[0]})` : brain.loading ? 'descargando…' : Brain.supported ? 'apagado; actívalo en Ajustes' : 'este navegador no tiene WebGPU'],
     [app.map ? 'ok' : 'meh', 'Mapa de calles', app.map ? 'descargado' : 'no; di "descarga el mapa"'],
