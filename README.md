@@ -84,18 +84,6 @@ Qwen3‑1.7B (~1 GB) en el resto. Entiende frases libres ("tengo hambre, ¿me ll
 lo último que hablasteis y conversa. Si Faro no te entiende, te ofrece activarlo.
 Necesita un móvil reciente con WebGPU (Chrome en Android reciente).
 
-## Claude (opcional, por internet)
-
-Si quieres que Faro te entienda como Claude, abre **Ajustes → Claude** y pega tu clave de API de Anthropic
-(se crea en console.anthropic.com). Entonces:
-
-- Lo que las órdenes normales no entienden lo interpreta Claude (`claude-opus-5-5`), que además conversa y recuerda lo hablado.
-- "Mira bien", "léeme el cartel", "¿de qué color es?": manda **una foto** de la cámara y te la describe.
-
-Es la **excepción a la regla "sin APIs"**: necesita internet, se paga por uso en tu cuenta de Anthropic y envía
-a Anthropic tus frases (y la foto cuando la pides). La clave se guarda solo en el teléfono. **Sin clave o sin
-internet**, Faro lo dice y sigue funcionando con lo que hay en el teléfono.
-
 ## Límites (dicho con honestidad)
 
 - **No es tan listo como un modelo grande en la nube.** Sin APIs, el entendimiento es un analizador de

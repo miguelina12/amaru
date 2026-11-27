@@ -93,19 +93,6 @@
         <button class="act" id="tglBrain" aria-pressed="false">Modo inteligente</button>
         <button class="act" data-cmd="ayuda">Ayuda</button>
       </div>
-      <h2 class="sub">Claude (opcional)</h2>
-      <p class="note">Con tu clave de API de Anthropic, Faro te entiende como Claude y puede mirar con detalle ("mira bien", "léeme el cartel").
-        Necesita internet y se paga por uso en tu cuenta de Anthropic. Tus frases y, al pedirlo, la foto se envían a Anthropic.
-        La clave se guarda solo en este teléfono.</p>
-      <p id="keyState" class="note"></p>
-      <form id="keyForm" autocomplete="off">
-        <label for="keyIn" class="sr">Clave de API de Anthropic</label>
-        <input id="keyIn" type="password" autocomplete="off" placeholder="Pega aquí tu clave sk-ant-…">
-        <button type="submit" class="send" aria-label="Guardar clave">✓</button>
-      </form>
-      <button id="keyDel" class="ghost" hidden>Borrar clave</button>
-
-      <h2 class="sub">Escribir una orden</h2>
       <form id="typeForm">
         <label for="typeIn" class="sr">Escribe una orden</label>
         <input id="typeIn" autocomplete="off" enterkeyhint="send" placeholder="Escribe: llévame a la cocina">

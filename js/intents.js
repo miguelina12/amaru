@@ -129,7 +129,6 @@ const RULES = [
   ['save_place', /^(?:esto es|aqui (?:esta|es)|estamos en|este es|esta es)\s+(?<name>.+)$/],
   ['delete', /\b(?:borra|borrar|elimina|eliminar|olvida|olvidar|quita)\b(?:\s+(?:el|la|lugar|sitio|ruta|camino))*\s+(?<name>.+)$/],
   ['find', /\b(?:busca|buscar|buscame|encuentra|encontrar|encuentrame|localiza|donde hay)\s+(?<name>.+)$/],
-  ['look', /\b(?:mira bien|mira con detalle|(?:describe|describeme|cuentame)(?: lo que (?:hay|ves))?(?: (?:con|en|al)) detalle|con (?:mas )?detalle|que pone|que dice (?:el|la|ese|esa|este|esta)|leeme|lee (?:el|la|lo|esto|eso|ese|esa)|de que color|que color)\b/],
   ['describe', /\b(?:que (?:hay|ves|tengo|veo)|describe|describeme|describir|mira|que es esto|que me rodea|alrededor|lo que hay)\b/],
   ['where', /\b(?:donde estoy|mi (?:ubicacion|posicion)|en que (?:sitio|lugar|calle|parte) estoy|localizame|ubicame|donde me encuentro)\b/],
   ['heading', /\b(?:hacia donde (?:miro|voy|estoy mirando|apunto)|brujula|orientacion|que direccion|donde esta el norte|hacia que lado)\b/],
@@ -179,7 +178,7 @@ const EXAMPLES = {
 };
 
 export const INTENT_DESC = {
-  describe: 'que te diga qué hay delante', look: 'que Claude mire con detalle', where: 'saber dónde estás', heading: 'saber hacia dónde miras',
+  describe: 'que te diga qué hay delante', where: 'saber dónde estás', heading: 'saber hacia dónde miras',
   help: 'la ayuda', stop: 'que pare', steps: 'saber cuántos pasos llevas', time: 'saber la hora',
   list: 'la lista de lugares', repeat: 'que repita', go_back: 'volver por donde has venido', finish: 'decir que has llegado',
   calibrate: 'calibrar tus pasos', progress: 'saber cuánto falta', download_map: 'descargar el mapa',
