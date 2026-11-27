@@ -1,5 +1,5 @@
 // Service worker: guarda la app y el detector en el teléfono para que funcione sin conexión.
-const VERSION = 'faro-v6';
+const VERSION = 'faro-v7';
 const MODELS = 'faro-models-v2'; // aparte, para no volver a descargar el modelo al actualizar la app
 const SHELL = [
   './', 'index.html', 'css/styles.css', 'manifest.webmanifest', 'icons/icon.svg',
@@ -35,7 +35,7 @@ self.addEventListener('fetch', (e) => {
   } else if (sameOrigin) {
     // red primero (para recibir actualizaciones), caché si no hay conexión
     e.respondWith(
-      fetch(req)
+      fetch(req, { cache: 'no-cache' })
         .then((res) => { const copy = res.clone(); caches.open(VERSION).then((c) => c.put(req, copy)); return res; })
         .catch(() => caches.match(req).then((r) => r || caches.match('index.html'))),
     );
