@@ -26,7 +26,7 @@ servidor. Todo se calcula dentro del teléfono:
 1. Abre la app y toca **"Toca para empezar"** (acepta cámara, ubicación y movimiento).
 2. Sujeta el teléfono **a la altura del pecho, en vertical, con la cámara trasera hacia delante**.
    Faro te avisa si lo llevas inclinado, tapado, borroso o con poca luz (y enciende la linterna).
-3. **Toca cualquier parte grande de la pantalla** y habla.
+3. **Toca el botón amarillo grande** y habla. Abajo tienes Repetir, ¿Dónde estoy?, ¿Qué hay delante? y Parar; el resto está en **Ajustes**.
 
 ### Ejemplos de órdenes
 

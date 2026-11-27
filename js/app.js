@@ -46,6 +46,19 @@ const stepLength = () => S.stepLength || 0.65;
 function say(text, opts) {
   voice.say(text, opts);
   log(text);
+  chat(text, false);
+}
+
+/** Conversación visible (para acompañantes o baja visión). */
+function chat(text, me) {
+  const el = $('chat');
+  if (!el || !text) return;
+  const li = document.createElement('li');
+  if (me) li.className = 'me';
+  li.textContent = text;
+  el.append(li);
+  while (el.children.length > 60) el.firstChild.remove();
+  el.scrollTop = el.scrollHeight;
 }
 
 function log(text) {
@@ -56,6 +69,7 @@ function log(text) {
 function heard(text) {
   const el = $('heard');
   if (el) el.textContent = text ? `«${text}»` : '';
+  if (text) chat(text, true);
 }
 
 const safety = new Safety({
@@ -99,6 +113,9 @@ async function start() {
   } catch {
     camOk = false;
   }
+  app.camOk = camOk;
+  app.motionOk = okMotion;
+  app.orientOk = okOrient;
 
   const tips = ['Hola, soy Faro. Toca el botón grande para hablarme.'];
   if (camOk) tips.push('Lleva el teléfono a la altura del pecho, con la cámara hacia delante.');
@@ -111,8 +128,8 @@ async function start() {
   if (camOk) {
     vision.start();
     vision.loadModel()
-      .then(() => { log(`Detector listo (${vision.kind})`); audio.cue.ok(); })
-      .catch(() => say('No he podido cargar el detector de obstáculos. Conéctate a internet una vez para descargarlo.'));
+      .then(() => { audio.cue.ok(); updateInfo(); })
+      .catch(() => (app.modelFailed = true, say('No he podido cargar el detector de obstáculos. Conéctate a internet una vez para descargarlo.')));
   }
   setInterval(aimCoach, 2500);
   setInterval(updateInfo, 2000);
@@ -220,11 +237,29 @@ $('talk').addEventListener('click', () => listenOnce());
 $('btnWhat').addEventListener('click', () => handle('qué hay delante'));
 $('btnWhere').addEventListener('click', () => handle('dónde estoy'));
 $('btnStop').addEventListener('click', () => handle('para'));
-$('btnHelp').addEventListener('click', () => handle('ayuda'));
+$('btnRepeat').addEventListener('click', () => handle('repite'));
+
+// Ajustes
+function openSettings(open) {
+  $('settings').hidden = !open;
+  if (open) { updateInfo(); $('btnClose').focus(); } else $('btnSettings').focus();
+}
+$('btnSettings').addEventListener('click', () => openSettings(true));
+$('btnClose').addEventListener('click', () => openSettings(false));
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('settings').hidden) openSettings(false); });
+for (const b of document.querySelectorAll('[data-cmd]')) {
+  b.addEventListener('click', () => { openSettings(false); handle(b.dataset.cmd); });
+}
+$('tglSonar').addEventListener('click', () => handle(S.sonar ? 'desactiva el sónar' : 'activa el sónar').then(updateInfo));
+$('tglHands').addEventListener('click', () => { openSettings(false); handle(S.handsFree ? 'desactiva manos libres' : 'activa manos libres'); });
+$('tglTorch').addEventListener('click', () => handle(vision.torchOn ? 'apaga la linterna' : 'enciende la linterna').then(updateInfo));
+$('checksBox').addEventListener('toggle', updateInfo);
+$('tglCam').addEventListener('click', () => { $('camwrap').classList.toggle('off'); updateInfo(); });
 $('typeForm').addEventListener('submit', (e) => {
   e.preventDefault();
   const v = $('typeIn').value.trim();
   $('typeIn').value = '';
+  openSettings(false);
   if (v) handle(v);
 });
 
@@ -236,6 +271,7 @@ async function listenOnce() {
   app.listening = true;
   $('talk').classList.add('on');
   $('talkLabel').textContent = 'Te escucho';
+  $('talkHint').textContent = 'habla ahora';
   audio.cue.listen();
   try {
     const alts = await listener.listen();
@@ -248,7 +284,8 @@ async function listenOnce() {
   } finally {
     app.listening = false;
     $('talk').classList.remove('on');
-    $('talkLabel').textContent = 'Hablar';
+    $('talkLabel').textContent = 'Toca para hablar';
+    $('talkHint').textContent = 'en cualquier parte de este botón';
   }
   // Después de la primera escucha, prepara el reconocimiento dentro del teléfono (sin bloquear).
   if (!app.localChecked) { app.localChecked = true; listener.prepareLocal(); }
@@ -832,20 +869,46 @@ async function enableBrain(silent = false) {
 // ------------------------------------------------------------------ pantalla (para acompañantes)
 
 function updateInfo() {
-  const el = $('chips');
-  if (!el) return;
   const p = gps.last;
-  const chips = [];
-  if (app.recording) chips.push(['● Grabando', true]);
-  if (app.nav) chips.push([`→ ${app.nav.route?.name || app.nav.name}`, true]);
-  chips.push([`${ped.count} pasos`]);
-  if (compass.heading != null) chips.push([geo.cardinal(compass.heading)]);
-  chips.push([p && Date.now() - p.t < 30000 ? `GPS ±${Math.round(p.acc)} m` : 'Sin GPS']);
-  el.replaceChildren(...chips.map(([t, w]) => {
-    const c = document.createElement('span');
-    c.className = 'chip' + (w ? ' warn' : '');
-    c.textContent = t;
-    return c;
+  const gpsOk = p && Date.now() - p.t < 30000;
+  const parts = [];
+  if (app.recording) parts.push('● grabando ruta');
+  if (app.nav) parts.push(`→ ${app.nav.route?.name || app.nav.name}`);
+  parts.push(gpsOk ? `GPS ±${Math.round(p.acc)} m` : 'GPS buscando…');
+  parts.push(`${ped.count} pasos`);
+  parts.push(`paso ${Math.round(stepLength() * 100)} cm`);
+  parts.push(`brújula ${compass.heading != null ? geo.cardinal(compass.heading) : 'no'}`);
+  parts.push(`cámara ${app.camOk ? 'sí' : 'no'}`);
+  const st = $('status');
+  if (st) st.textContent = parts.join(' · ');
+
+  const set = (id, on) => { const b = $(id); if (b) b.setAttribute('aria-pressed', String(!!on)); };
+  set('tglSonar', S.sonar);
+  set('tglHands', S.handsFree);
+  set('tglTorch', vision.torchOn);
+  set('tglCam', !$('camwrap')?.classList.contains('off'));
+
+  const ul = $('checks');
+  if (!ul || !$('checksBox')?.open && ul.children.length) return;
+  const rows = [
+    ['ok', 'Voz', speechSynthesis.getVoices().length ? 'sí' : 'cargando voces…'],
+    [listener.supported ? 'ok' : 'no', 'Escucha', listener.supported ? 'sí' : 'no: usa los botones o escribe en Ajustes'],
+    [app.camOk ? 'ok' : 'no', 'Cámara', app.camOk ? 'sí' : 'no hay permiso o no hay cámara'],
+    [vision.model ? 'ok' : app.modelFailed ? 'no' : 'meh', 'Detector de obstáculos',
+      vision.model ? (vision.kind?.includes('casa') ? 'general + especialista de casa' : 'general') + (vision.kind?.includes('webgpu') ? ', rápido (WebGPU)' : ', modo lento (sin WebGPU)')
+        : app.modelFailed ? 'no se pudo descargar' : 'cargando…'],
+    [gpsOk ? 'ok' : 'meh', 'GPS', gpsOk ? `precisión ±${Math.round(p.acc)} m` : 'buscando señal (en casa es normal)'],
+    [compass.heading != null ? 'ok' : 'no', 'Brújula', compass.heading != null ? 'sí' : 'no da datos'],
+    [app.motionOk !== false ? 'ok' : 'no', 'Contador de pasos', app.motionOk !== false ? 'sí' : 'sin permiso de movimiento'],
+    [app.map ? 'ok' : 'meh', 'Mapa de calles', app.map ? 'descargado' : 'no; di "descarga el mapa"'],
+    ['wakeLock' in navigator ? 'ok' : 'meh', 'Pantalla encendida', 'wakeLock' in navigator ? 'sí' : 'puede apagarse sola'],
+  ];
+  ul.replaceChildren(...rows.map(([c, k, v]) => {
+    const li = document.createElement('li');
+    li.className = c;
+    li.innerHTML = `<b>${c === 'ok' ? '✓' : c === 'no' ? '✗' : '…'}</b> ${k}: <span></span>`;
+    li.lastChild.textContent = v;
+    return li;
   }));
 }
 
