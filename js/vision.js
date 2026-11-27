@@ -95,7 +95,7 @@ export class Vision extends EventTarget {
         detect: async (src, W, H) => {
           const g = await yolo.detect(src, W, H, 0.35);
           if (!casa) return g;
-          const c = await casa.detect(src, W, H, 0.35);
+          const c = await casa.detect(src, W, H, 0.3);
           return merge(g, c, labels.group);
         },
       };

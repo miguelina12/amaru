@@ -94,11 +94,35 @@ Necesita un móvil reciente con WebGPU (Chrome en Android reciente).
 - **El GPS falla en interior**: en casa se usan pasos + brújula, y la brújula puede desviarse cerca de
   metales o electrodomésticos.
 - **Ningún detector reconoce el 100 %.** Faro conoce 253 cosas, pero puede fallar con poca luz, objetos tapados,
-  de lado o muy pequeños. Puertas y ventanas se miden en `docs` del README (ver "Precisión medida").
+  de lado o muy pequeños (ver "Precisión medida").
   En móviles sin WebGPU analiza unas 1–2 imágenes por segundo.
 - **El reconocimiento de voz** solo funciona totalmente en el teléfono en navegadores que lo permiten
   (Chrome reciente). En otros, el navegador puede usar su propio servicio; puedes usar los botones o escribir.
 - La primera descarga del detector necesita internet (después queda guardado).
+
+## Precisión medida
+
+Medido con 404 fotos de casas reales que los detectores **no vieron al entrenar** (HomeObjects-3K, validación),
+con los dos detectores juntos como funcionan en la app. "Encontrados" = de cada 100 objetos que había en las fotos,
+cuántos detectó en **una sola foto** (caminando, Faro ve muchas fotos seguidas del mismo objeto):
+
+| Objeto | Encontrados | Antes (solo detector general) |
+|---|---|---|
+| Puerta | **51 %** | 32 % (20 % en la versión anterior) |
+| Ventana | 61 % | 2 % |
+| Armario | 61 % | 28 % |
+| Cama | 86 % | 77 % |
+| Sofá | 84 % | 71 % |
+| Silla | 78 % | 73 % |
+| Mesa | 79 % | 68 % |
+| Televisor | 80 % | — |
+| Lámpara | 60 % | — |
+
+- Ninguna puerta se confundió con una persona.
+- De cada 2 "puertas" que anuncia, más o menos 1 no está marcada como puerta en las fotos (a veces es
+  un armario o un hueco). Por eso las puertas se anuncian sin alarma.
+- Semáforos, animales, sanitarios (váter, bidé) y puertas correderas están en el vocabulario,
+  pero no hay fotos de prueba etiquetadas para medirlos; no damos un porcentaje inventado.
 
 ## Estructura
 
