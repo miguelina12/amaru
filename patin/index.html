@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Amaru Patín</title>
+  <meta name="theme-color" content="#0b0f17">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="css/patin.css">
+</head>
+<body>
+  <header class="top">
+    <div>
+      <h1>Amaru Patín</h1>
+      <p id="status" class="status" role="status">Desconectado</p>
+    </div>
+    <div class="top-actions">
+      <button id="demo" class="btn">Demo</button>
+      <button id="connect" class="btn primary">Conectar</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="card gauge-card">
+      <svg viewBox="0 0 200 130" class="gauge" aria-hidden="true">
+        <path d="M20 115 A85 85 0 0 1 180 115" class="arc-bg"/>
+        <path id="arc-limit" d="M20 115 A85 85 0 0 1 180 115" class="arc-limit"/>
+        <path id="arc-speed" d="M20 115 A85 85 0 0 1 180 115" class="arc-speed"/>
+      </svg>
+      <div class="gauge-text">
+        <span id="live" class="live">--</span><span class="unit">km/h</span>
+        <small>Límite: <b id="limit-label">25</b> km/h</small>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="row">
+        <h2>Patín</h2>
+        <button id="power" class="power" aria-pressed="false" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v9M6.3 6.3a8 8 0 1 0 11.4 0" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+          <span id="power-label">Apagado</span>
+        </button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="row">
+        <h2>Velocidad máxima</h2>
+        <output id="speed-out" class="big">25</output>
+      </div>
+      <div class="slider-row">
+        <button class="btn round" data-step="-1" aria-label="Bajar 1 km/h" disabled>−</button>
+        <input id="speed" type="range" min="0" max="40" step="1" value="25" aria-label="Velocidad máxima en km/h" disabled>
+        <button class="btn round" data-step="1" aria-label="Subir 1 km/h" disabled>+</button>
+      </div>
+      <div class="ticks"><span>0</span><span>10</span><span>20</span><span>30</span><span>40</span></div>
+      <div class="chips" id="speed-chips">
+        <button class="chip" data-speed="6" disabled>6</button>
+        <button class="chip" data-speed="15" disabled>15</button>
+        <button class="chip" data-speed="25" disabled>25</button>
+        <button class="chip" data-speed="30" disabled>30</button>
+        <button class="chip" data-speed="40" disabled>40</button>
+      </div>
+      <p class="hint">Se envía al soltar. Comprueba el límite legal de tu zona (en muchos sitios es 25 km/h).</p>
+    </section>
+
+    <section class="card">
+      <h2>Luces del panel</h2>
+      <div class="segmented" id="lights" role="radiogroup" aria-label="Modo de luces">
+        <button data-mode="lightsOff" role="radio" aria-checked="true" disabled>Apagadas</button>
+        <button data-mode="lightsOn" role="radio" aria-checked="false" disabled>Encendidas</button>
+        <button data-mode="lightsBlink" role="radio" aria-checked="false" disabled>Intermitentes</button>
+      </div>
+      <div class="colors" id="colors" aria-label="Color de las luces">
+        <button data-color="ffffff" style="--c:#ffffff" aria-label="Blanco" disabled></button>
+        <button data-color="ff2d2d" style="--c:#ff2d2d" aria-label="Rojo" disabled></button>
+        <button data-color="ff9500" style="--c:#ff9500" aria-label="Naranja" disabled></button>
+        <button data-color="30d158" style="--c:#30d158" aria-label="Verde" disabled></button>
+        <button data-color="0a84ff" style="--c:#0a84ff" aria-label="Azul" disabled></button>
+        <button data-color="bf5af2" style="--c:#bf5af2" aria-label="Morado" disabled></button>
+        <label class="picker" aria-label="Otro color"><input id="color-custom" type="color" value="#00e5ff" disabled></label>
+      </div>
+    </section>
+
+    <details class="card" id="settings">
+      <summary><h2>Ajustes del patín</h2></summary>
+      <p class="hint">Cada marca usa sus propios comandos Bluetooth. Escríbelos en hexadecimal.
+        Variables: <code>{v}</code> velocidad (1 byte), <code>{v10le}</code> velocidad×10 (2 bytes),
+        <code>{r}{g}{b}</code> color.</p>
+      <label>Nombre empieza por (opcional)<input id="f-namePrefix" placeholder="p. ej. MiScooter"></label>
+      <label>Tipo de conexión
+        <select id="f-transport"></select>
+      </label>
+      <label>Servicio UUID<input id="f-service" spellcheck="false"></label>
+      <label>Característica de escritura<input id="f-write" spellcheck="false"></label>
+      <label>Característica de notificaciones<input id="f-notify" spellcheck="false"></label>
+      <label>Byte de la velocidad en las notificaciones (opcional)<input id="f-speedByte" inputmode="numeric" placeholder="p. ej. 5"></label>
+      <label>Suma de control<select id="f-checksum"></select></label>
+      <label class="check"><input id="f-withResponse" type="checkbox"> Escribir con confirmación</label>
+      <div id="f-commands"></div>
+      <div class="actions">
+        <button id="save" class="btn primary">Guardar</button>
+        <button id="export" class="btn">Exportar</button>
+        <label class="btn">Importar<input id="import" type="file" accept="application/json" hidden></label>
+      </div>
+    </details>
+
+    <details class="card">
+      <summary><h2>Consola Bluetooth</h2></summary>
+      <div class="raw">
+        <input id="raw" placeholder="55 AA 03 …" spellcheck="false" aria-label="Bytes en hexadecimal">
+        <button id="raw-send" class="btn" disabled>Enviar</button>
+      </div>
+      <pre id="log" class="log" aria-live="polite"></pre>
+    </details>
+  </main>
+
+  <dialog id="confirm">
+    <form method="dialog">
+      <p id="confirm-text"></p>
+      <div class="actions">
+        <button value="no" class="btn">Cancelar</button>
+        <button value="yes" class="btn danger">Apagar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
