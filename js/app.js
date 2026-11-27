@@ -603,7 +603,7 @@ const handlers = {
         const fem = labels.info(o.cls).g.startsWith('f');
         return `${n} ${labels.pluralName(o.cls)}, ${fem ? 'la más cercana' : 'el más cercano'} ${where}${d}`;
       }
-      return `${labels.indef(o.cls)} ${where}${d}`;
+      return `${labels.spokenIndef(o)} ${where}${d}`;
     });
     say('Veo ' + joinY(parts) + '.');
   },
@@ -611,7 +611,7 @@ const handlers = {
   find(cmd) {
     const cls = labels.classFromSpanish(cmd.name);
     if (!cls) {
-      return say(`Todavía no sé reconocer ${cmd.name}. Reconozco personas, sillas, mesas, sofás, camas, plantas, nevera, inodoro, coches, bicicletas, perros, bancos, semáforos y otros objetos comunes.`);
+      return say(`Todavía no sé reconocer ${cmd.name}. Reconozco unas 250 cosas: muebles, puertas, ventanas, escaleras, electrodomésticos, el baño, la calle, vehículos y casi 80 animales. Prueba con otra palabra.`);
     }
     if (!vision.model) return say('El detector todavía se está cargando.');
     app.finding = { cls, started: Date.now(), lastSay: 0, lastSeen: 0 };
@@ -740,7 +740,7 @@ function onFinding(objects) {
     app.finding = null;
     return say(`No he encontrado ${labels.indef(f.cls)}. Dejo de buscar.`);
   }
-  const hits = objects.filter((o) => labels.group(o.cls) === labels.group(f.cls)).sort((a, b) => (a.dist ?? 99) - (b.dist ?? 99));
+  const hits = objects.filter((o) => labels.group(o.cls) === labels.group(f.cls) || (o.alt && labels.group(o.alt) === labels.group(f.cls))).sort((a, b) => (a.dist ?? 99) - (b.dist ?? 99));
   if (!hits.length) {
     if (now - Math.max(f.lastSeen, f.started) > 8000 && now - f.lastSay > 8000) {
       f.lastSay = now;
@@ -876,7 +876,7 @@ function drawOverlay(objects, W, H) {
     g.beginPath();
     g.roundRect ? g.roundRect(X, Y, Wd, Ht, 12) : g.rect(X, Y, Wd, Ht);
     g.stroke();
-    const label = `${labels.name(o.cls)}${o.dist != null ? ' · ' + o.dist.toFixed(1) + ' m' : ''}`;
+    const label = `${labels.spoken(o)}${o.dist != null ? ' · ' + o.dist.toFixed(1) + ' m' : ''}`;
     const tw = g.measureText(label).width + 16;
     const ly = Math.min(ch - 28, Math.max(4, Y - 28));
     const lx = Math.min(cw - tw - 4, Math.max(4, X));

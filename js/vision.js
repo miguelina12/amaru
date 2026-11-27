@@ -4,11 +4,14 @@
 
 import * as labels from './labels.js';
 import { clockOf } from './geo.js';
-import { YoloDetector } from './detector.js';
+import { YoloDetector, merge } from './detector.js';
 import { filter as plausible } from './plausibility.js';
 
 const YOLO_MODEL = new URL('../models/faro-detector-fp16.onnx', import.meta.url).href;
 const YOLO_NAMES = new URL('../models/faro-classes.json', import.meta.url).href;
+// Especialista de casa: entrenado con 2.285 fotos reales de casas (puertas, ventanas, armarios…)
+const CASA_MODEL = new URL('../models/faro-casa.onnx', import.meta.url).href;
+const CASA_NAMES = ['bed', 'sofa', 'chair', 'table', 'lamp', 'tv', 'laptop', 'wardrobe', 'window', 'door', 'potted plant', 'photo frame'];
 
 const TFJS = 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js';
 const COCO = 'https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js';
@@ -78,10 +81,25 @@ export class Vision extends EventTarget {
     if (this.model) return;
     try {
       const names = await (await fetch(YOLO_NAMES)).json();
-      const yolo = new YoloDetector({ modelUrl: YOLO_MODEL, names, wanted: new Set(names.filter(labels.KNOWN)), size: 416, groupOf: labels.group });
+      const yolo = new YoloDetector({ modelUrl: YOLO_MODEL, names, wanted: new Set(names.filter(labels.KNOWN)), size: 416, groupOf: labels.group, prior: (n) => (labels.is(n, 'r') ? 0.6 : 1) });
       await yolo.load();
-      this.model = { detect: (src, W, H) => yolo.detect(src, W, H, 0.4) };
-      this.kind = 'yolo-' + yolo.backend;
+      let casa = null;
+      try {
+        casa = new YoloDetector({ modelUrl: CASA_MODEL, names: CASA_NAMES, wanted: new Set(CASA_NAMES), size: 416, groupOf: labels.group });
+        await casa.load();
+      } catch (e) {
+        console.warn('Especialista de casa no disponible', e);
+        casa = null;
+      }
+      this.model = {
+        detect: async (src, W, H) => {
+          const g = await yolo.detect(src, W, H, 0.35);
+          if (!casa) return g;
+          const c = await casa.detect(src, W, H, 0.35);
+          return merge(g, c, labels.group);
+        },
+      };
+      this.kind = 'yolo-' + yolo.backend + (casa ? '+casa' : '');
       return;
     } catch (e) {
       console.warn('YOLO no disponible, uso COCO-SSD', e);
@@ -245,5 +263,7 @@ export function enrich(p, W, H, pitch) {
     pxH: h,
     clipped: { top: clipTop, bottom: clipBot, left: clipL, right: clipR },
     realH: e.ground ? (h * e.ground) / f : null,
+    // duda entre dos cosas parecidas (p. ej. perro o gato): la segunda opción casi tan probable
+    alt: p.alt && p.altScore >= 0.45 * p.score && labels.group(p.alt) !== labels.group(p.class) ? p.alt : null,
   };
 }

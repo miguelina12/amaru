@@ -11,7 +11,7 @@ servidor. Todo se calcula dentro del teléfono:
 |---|---|
 | Voz | Síntesis de voz del sistema (`speechSynthesis`); elige la voz local de mayor calidad |
 | Escucha | Reconocimiento de voz del navegador; usa el modo **en el dispositivo** cuando el navegador lo ofrece |
-| Obstáculos | Detector YOLOE propio (puertas, escaleras, postes, farolas, personas, muebles, vehículos, paso de peatones…) ejecutado en el móvil con ONNX Runtime; el modelo viaja con la app |
+| Obstáculos | Dos detectores en el móvil (ONNX Runtime): uno general con **253 objetos y animales** (casa, baño, cocina, calle, vehículos, ~80 animales; ver `js/vocab.js`) y un **especialista de casa entrenado con 2.285 fotos reales** (puertas, ventanas, armarios, camas…) |
 | Distancias | Geometría de la cámara: tamaño real del objeto + inclinación del teléfono |
 | Pasos | Acelerómetro con detección de picos y calibración |
 | Orientación | Brújula del teléfono (hacia dónde mira la cámara) |
@@ -46,6 +46,8 @@ Mientras caminas, Faro vigila un "pasillo" de unos 90 cm delante de ti:
 - **Aviso:** "Silla delante, a 3 pasos. Desvíate a la izquierda." (pitido en el lado del obstáculo)
 - **Alto:** "¡Alto! Persona justo delante." con vibración fuerte, también si algo se te acerca rápido.
 - **Vehículos** (coche, moto, bici, autobús): aviso desde unos 7 metros.
+- **Sentido común:** si duda entre dos cosas parecidas lo dice ("un perro o un gato"); los animales salvajes
+  solo se anuncian si está muy seguro; descarta tamaños y formas imposibles y cosas fuera de lugar.
 - **Escaleras:** "Cuidado: escaleras delante, a 5 pasos" y "¡Alto!" si estás muy cerca.
 - **Puertas, paso de peatones, semáforos:** se anuncian una vez, sin alarma.
 - **Sin repeticiones:** un objeto solo cuenta si aparece en varias imágenes seguidas, cada obstáculo
@@ -91,9 +93,9 @@ Necesita un móvil reciente con WebGPU (Chrome en Android reciente).
   que la guía no sustituye a escuchar el tráfico al cruzar.
 - **El GPS falla en interior**: en casa se usan pasos + brújula, y la brújula puede desviarse cerca de
   metales o electrodomésticos.
-- **El detector reconoce unas 40 categorías** elegidas para moverse (personas, puertas, escaleras, postes,
-  muebles, vehículos…). No ve bordillos, agujeros, cristales ni paredes lisas de forma fiable, y puede fallar
-  con poca luz. En móviles sin WebGPU analiza unas 2 imágenes por segundo.
+- **Ningún detector reconoce el 100 %.** Faro conoce 253 cosas, pero puede fallar con poca luz, objetos tapados,
+  de lado o muy pequeños. Puertas y ventanas se miden en `docs` del README (ver "Precisión medida").
+  En móviles sin WebGPU analiza unas 1–2 imágenes por segundo.
 - **El reconocimiento de voz** solo funciona totalmente en el teléfono en navegadores que lo permiten
   (Chrome reciente). En otros, el navegador puede usar su propio servicio; puedes usar los botones o escribir.
 - La primera descarga del detector necesita internet (después queda guardado).

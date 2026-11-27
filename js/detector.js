@@ -40,31 +40,41 @@ export function nms(dets, thr = 0.45, groupOf = (c) => c) {
  * Decodifica la salida YOLOv8 [1, 4 + C, N] (cx, cy, w, h en píxeles del tensor S×S).
  * wanted: Map índiceClase -> nombre. Solo se consideran esas clases.
  */
-export function decode(out, C, N, wanted, minScore, lb) {
+export function decode(out, C, N, wanted, minScore, lb, groupIdx = null, prior = null) {
   const dets = [];
   for (let i = 0; i < N; i++) {
-    let best = -1, bs = minScore;
+    let best = -1, bs = minScore, alt = -1, as = 0;
     for (const [c] of wanted) {
-      const s = out[(4 + c) * N + i];
-      if (s > bs) { bs = s; best = c; }
+      const s = prior ? out[(4 + c) * N + i] * prior[c] : out[(4 + c) * N + i];
+      if (s > bs) {
+        if (best >= 0 && (!groupIdx || groupIdx[best] !== groupIdx[c]) && bs > as) { alt = best; as = bs; }
+        bs = s; best = c;
+      } else if (s > as && s > minScore * 0.5 && (!groupIdx || best < 0 || groupIdx[best] !== groupIdx[c])) { alt = c; as = s; }
     }
     if (best < 0) continue;
     const cx = out[i], cy = out[N + i], w = out[2 * N + i], h = out[3 * N + i];
     const x = (cx - w / 2 - lb.dx) / lb.scale;
     const y = (cy - h / 2 - lb.dy) / lb.scale;
-    dets.push({ class: wanted.get(best), score: bs, bbox: [x, y, w / lb.scale, h / lb.scale] });
+    const d = { class: wanted.get(best), score: bs, bbox: [x, y, w / lb.scale, h / lb.scale] };
+    if (alt >= 0 && groupIdx && groupIdx[alt] !== groupIdx[best]) { d.alt = wanted.get(alt); d.altScore = as; }
+    dets.push(d);
   }
   return dets;
 }
 
 export class YoloDetector {
-  constructor({ modelUrl, names, wanted, size = 416, groupOf }) {
+  constructor({ modelUrl, names, wanted, size = 416, groupOf, prior }) {
     this.modelUrl = modelUrl;
     this.names = names; // array de nombres de clase del modelo
     this.size = size;
     this.groupOf = groupOf;
     this.wanted = new Map();
     names.forEach((n, i) => { if (wanted.has(n)) this.wanted.set(i, n); });
+    // índice de concepto por clase, para saber si la "segunda opción" es otra cosa distinta
+    // "sentido común": peso de cada clase (p. ej. animales raros en una ciudad pesan menos)
+    this.prior = prior ? Float32Array.from(names, (n) => prior(n)) : null;
+    const gmap = new Map();
+    this.groupIdx = names.map((n) => { const g = groupOf ? groupOf(n) : n; if (!gmap.has(g)) gmap.set(g, gmap.size); return gmap.get(g); });
     this.session = null;
     this.backend = null;
     this.canvas = document.createElement('canvas');
@@ -114,7 +124,27 @@ export class YoloDetector {
     const [, , N] = t.dims;
     const data = t.data instanceof Float32Array ? t.data : await t.getData();
     // filas: 4 de caja + clases (+ 32 coeficientes de máscara que ignoramos)
-    const dets = decode(data, this.names.length, N, this.wanted, minScore, { scale, dx, dy });
+    const dets = decode(data, this.names.length, N, this.wanted, minScore, { scale, dx, dy }, this.groupIdx, this.prior);
     return nms(dets, 0.45, this.groupOf).slice(0, 20);
   }
+}
+
+/**
+ * Une las detecciones del detector general y del especialista de casa.
+ * Si los dos ven lo mismo (mismo concepto, mucho solape), gana el especialista,
+ * que está entrenado con fotos reales de casas (puertas, ventanas, armarios…).
+ */
+export function merge(general, specialist, groupOf = (c) => c) {
+  const tagged = [
+    ...specialist.map((d) => ({ ...d, _rank: d.score + 0.2, source: 'casa' })),
+    ...general.map((d) => ({ ...d, _rank: d.score, source: 'general' })),
+  ];
+  tagged.sort((a, b) => b._rank - a._rank);
+  const keep = [];
+  for (const d of tagged) {
+    const g = groupOf(d.class);
+    if (keep.some((k) => groupOf(k.class) === g && iou(k.bbox, d.bbox) > 0.45)) continue;
+    keep.push(d);
+  }
+  return keep.map(({ _rank, ...d }) => d);
 }

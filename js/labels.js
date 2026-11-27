@@ -1,3 +1,4 @@
+import { VOCAB } from './vocab.js';
 // Nombres en español de las 80 clases COCO, con género, tamaño real aproximado
 // (alto/ancho en metros, para estimar distancias) y si cuentan como obstáculo.
 
@@ -86,55 +87,48 @@ const L = {
 };
 
 
-// ---- Vocabulario del detector de Faro (YOLOE, categorías elegidas para moverse sin ver).
-// Las que coinciden con COCO (person, chair, car…) reutilizan las entradas de arriba.
-const FARO = {
-  door: ['puerta', 'f', 2.0, 0.85, true], stairs: ['escaleras', 'fp', 0, 1.0, true],
-  table: ['mesa', 'f', 0.75, 1.2, true], sofa: ['sofá', 'm', 0.85, 2.0, true],
-  van: ['furgoneta', 'f', 2.0, 1.9, true], pole: ['poste', 'm', 0, 0.15, true], 'street lamp': ['farola', 'f', 0, 0.3, true],
-  tree: ['árbol', 'm', 0, 0.5, true], 'trash can': ['papelera', 'f', 0.9, 0.5, true], fence: ['valla', 'f', 0, 0, true],
-  cabinet: ['armario', 'm', 0, 0, true], shelf: ['estantería', 'f', 0, 0, true], window: ['ventana', 'f', 0, 0, false],
-  bathtub: ['bañera', 'f', 0.55, 1.6, true], 'washing machine': ['lavadora', 'f', 0.85, 0.6, true],
-  stroller: ['carrito de bebé', 'm', 1.0, 0.6, true], wheelchair: ['silla de ruedas', 'f', 0.9, 0.65, true],
-  'shopping cart': ['carrito', 'm', 1.0, 0.6, true], scooter: ['patinete', 'm', 1.0, 0.5, true],
-  'traffic cone': ['cono', 'm', 0.5, 0.35, true], 'door handle': ['pomo de la puerta', 'm', 0, 0, false],
-  'light switch': ['interruptor de la luz', 'm', 0, 0, false], column: ['columna', 'f', 0, 0.4, true],
-  crosswalk: ['paso de peatones', 'm', 0, 0, false], box: ['caja', 'f', 0, 0, true],
-};
-for (const [k, v] of Object.entries(FARO)) L[k] = v;
+// ---- Vocabulario completo de Faro (js/vocab.js): cada forma de pedirlo ("door", "wooden door"…)
+// apunta al mismo concepto en español. Sustituye a las entradas COCO cuando coinciden.
+const FLAGS = {};
+const FIRST_PROMPT = {}; // nombre en español -> primer prompt
+for (const [es, g, ps, h, w, f] of VOCAB) {
+  for (const p of ps.split('|')) { L[p] = [es, g, h, w, f.includes('o')]; FLAGS[p] = f; }
+  FIRST_PROMPT[es] = ps.split('|')[0];
+}
 
+// Sinónimos en español (sin tildes) -> nombre del concepto
 const SYNONYMS = {
-  person: ['gente', 'alguien', 'hombre', 'mujer', 'nino', 'nina', 'personas', 'señor', 'senor', 'señora', 'senora'],
-  car: ['coches', 'auto', 'carro', 'automovil', 'vehiculo', 'taxi'],
-  'dining table': ['mesas', 'mesita', 'escritorio'],
-  chair: ['sillas', 'asiento', 'taburete'],
-  couch: ['sillon', 'sofa'],
-  bed: ['camas'],
-  refrigerator: ['frigorifico', 'nevera', 'refrigerador', 'heladera'],
-  toilet: ['vater', 'water', 'retrete', 'bano', 'wc'],
-  'cell phone': ['telefono', 'movil', 'celular'],
-  tv: ['television', 'tele', 'televisor'],
-  cup: ['vaso', 'taza'],
-  'potted plant': ['maceta', 'planta', 'plantas'],
-  dog: ['perros', 'perrito'],
-  bench: ['bancos', 'banco'],
-  bus: ['autobus', 'bus', 'guagua', 'colectivo'],
-  bicycle: ['bici', 'bicicleta'],
-  'traffic light': ['semaforo', 'semaforos'],
-  sink: ['lavabo', 'fregadero', 'pila'],
-  bottle: ['botella', 'botellas'],
-  backpack: ['mochila'],
-  remote: ['mando'],
-  door: ['puertas', 'entrada', 'salida', 'portal'],
-  stairs: ['escalera', 'escalones', 'peldanos'],
-  'street lamp': ['farolas', 'farol'],
-  pole: ['postes', 'poste', 'pivote', 'bolardo'],
-  'trash can': ['basura', 'cubo de basura', 'papelera', 'contenedor'],
-  cabinet: ['armarios', 'mueble'],
-  window: ['ventanas'],
-  'door handle': ['pomo', 'manilla', 'picaporte', 'tirador'],
-  'light switch': ['interruptor', 'llave de la luz'],
-  crosswalk: ['paso de cebra', 'paso de peatones', 'cruce'],
+  persona: ['gente', 'alguien', 'hombre', 'mujer', 'nino', 'nina', 'personas', 'senor', 'senora', 'chico', 'chica'],
+  'váter': ['inodoro', 'retrete', 'wc', 'water', 'vater', 'taza del vater'],
+  nevera: ['frigorifico', 'refrigerador', 'heladera', 'frigo'],
+  televisor: ['tele', 'television', 'tv'],
+  'puerta corredera': ['puerta corrediza', 'corredera', 'corrediza'],
+  puerta: ['entrada', 'salida', 'puertas'],
+  escaleras: ['escalera', 'escalones', 'peldanos', 'escalon'],
+  'pomo de la puerta': ['pomo', 'manilla', 'picaporte', 'tirador'],
+  'interruptor de la luz': ['interruptor', 'llave de la luz'],
+  'cubo de basura': ['basura', 'cubo'],
+  'mando a distancia': ['mando'],
+  'móvil': ['celular', 'telefono'],
+  bicicleta: ['bici'],
+  coche: ['auto', 'carro', 'automovil', 'vehiculo'],
+  'autobús': ['guagua', 'colectivo', 'bus', 'micro'],
+  perro: ['perrito', 'perros'],
+  gato: ['gatito', 'gatos'],
+  planta: ['maceta', 'plantas', 'tiesto'],
+  farola: ['farol', 'farolas'],
+  bolardo: ['pivote', 'pivotes', 'bolardos'],
+  'paso de peatones': ['paso de cebra', 'cruce', 'paso peatonal'],
+  'semáforo de peatones': ['semaforo peatonal', 'semaforo de peatones'],
+  ordenador: ['computadora', 'pc'],
+  lavavajillas: ['lavaplatos'],
+  'sofá': ['sofa', 'sillon grande'],
+  armario: ['ropero', 'placard'],
+  'estantería': ['estante', 'balda', 'librería', 'libreria'],
+  contenedor: ['contenedor de basura', 'contenedores'],
+  lavabo: ['lavamanos'],
+  fregadero: ['pila', 'tarja'],
+  'pájaro': ['pajaro', 'ave', 'pajarito'],
 };
 
 const norm = (s) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -164,26 +158,37 @@ export function pluralName(cls) {
 export const plural = (cls) => info(cls).g.endsWith('p');
 /** Clave común para clases equivalentes (Man/Woman/Person → persona). */
 export const group = (cls) => name(cls);
-export const HAZARDS = new Set(['stairs']);
-/** Referencias útiles que se anuncian una vez, sin ser obstáculos. */
-export const LANDMARKS = new Set(['crosswalk', 'traffic light']);
+/** Marcas del vocabulario (ver js/vocab.js). */
+export const flags = (cls) => FLAGS[cls] ?? (L[cls]?.[4] ? 'o' : '');
+export const is = (cls, f) => flags(cls).includes(f);
+export const HAZARDS = { has: (cls) => is(cls, 'h') };
+/** Referencias útiles que se anuncian una vez (puertas, pasos de peatones, semáforos…). */
+export const LANDMARKS = { has: (cls) => is(cls, 'l') };
 export const KNOWN = (cls) => cls in L;
+export const promptFor = (es) => FIRST_PROMPT[es] || null;
+/** Cómo decir un objeto detectado, con la duda si la hay: "perro o gato". */
+export const spoken = (o) => (o.alt ? `${name(o.cls)} o ${name(o.alt)}` : name(o.cls));
+export const spokenIndef = (o) => (o.alt ? `${indef(o.cls)} o ${indef(o.alt)}` : indef(o.cls));
 export const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
-export const VEHICLES = new Set(['car', 'bus', 'truck', 'motorcycle', 'bicycle', 'train', 'van', 'scooter']);
+const COCO_VEHICLES = new Set(['car', 'bus', 'truck', 'motorcycle', 'bicycle', 'train']);
+export const VEHICLES = { has: (cls) => is(cls, 'v') || COCO_VEHICLES.has(cls) };
 
-/** Busca la clase COCO que corresponde a una palabra en español. */
+/** Busca la clase (prompt del detector) que corresponde a lo que dice el usuario en español. */
 export function classFromSpanish(word) {
-  const w = norm(word).replace(/^(un|una|el|la|los|las|mi)\s+/, '').trim();
-  for (const [cls, l] of Object.entries(L)) {
-    const n = norm(l[0]);
-    if (w === n || w === n + 's' || w === n + 'es') return cls;
+  const w = norm(word).replace(/^(un|una|unos|unas|el|la|los|las|mi|mis)\s+/, '').replace(/\s+(mas cercan[oa]s?|cerca)$/, '').trim();
+  if (!w) return null;
+  const concepts = Object.keys(FIRST_PROMPT);
+  // 1) nombre exacto (o en plural)
+  for (const es of concepts) {
+    const n = norm(es);
+    if (w === n || w === n + 's' || w === n + 'es') return FIRST_PROMPT[es];
   }
-  for (const [cls, syns] of Object.entries(SYNONYMS)) {
-    if (syns.some((s) => w === norm(s) || w.includes(norm(s)))) return cls;
-  }
-  for (const [cls, l] of Object.entries(L)) {
-    if (w.includes(norm(l[0]))) return cls;
-  }
+  // 2) sinónimo exacto
+  for (const [es, syns] of Object.entries(SYNONYMS)) if (syns.some((x) => w === norm(x))) return FIRST_PROMPT[es];
+  // 3) contiene un nombre o sinónimo (el más largo primero: "puerta corredera" antes que "puerta")
+  const all = [...concepts.map((es) => [norm(es), es]), ...Object.entries(SYNONYMS).flatMap(([es, xs]) => xs.map((x) => [norm(x), es]))]
+    .sort((a, b) => b[0].length - a[0].length);
+  for (const [n, es] of all) if (new RegExp(`\\b${n}\\b`).test(w)) return FIRST_PROMPT[es];
   return null;
 }

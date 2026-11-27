@@ -97,6 +97,7 @@ export class Safety {
     if (moving && now - this.lastWarn > WARN_GAP_MS) {
       for (const t of this.tracks.values()) {
         if (t.warned || t.hits < this.confirm || !labels.LANDMARKS.has(t.obj.cls) || t.d > 12) continue;
+        if (t.obj.obstacle && t.obj.inPath) continue; // ese ya lo avisa la parte de obstáculos
         if (Math.abs(t.obj.angle) > 25) continue;
         t.warned = true;
         this.lastWarn = now;
@@ -113,7 +114,7 @@ export class Safety {
       const approaching = canMove(o.cls) && t.nv >= 3 && t.v > 0.9 && t.d < 8 && t.d / t.v < 3;
       if (!moving && !approaching) continue;
       const pan = Math.max(-1, Math.min(1, o.angle / 30));
-      const nm = labels.cap(labels.name(o.cls));
+      const nm = labels.cap(labels.spoken(o));
 
       // PELIGRO
       if (t.d < (hazard ? 1.6 : 1.2) || approaching) {
@@ -145,7 +146,7 @@ export class Safety {
         let msg = `${nm} delante, a ${steps} ${steps === 1 ? 'paso' : 'pasos'}.`;
         if (vehicle && Math.abs(t.v) < 0.5) msg = `${nm} parado delante, a ${steps} pasos.`;
         if (hazard) msg = `Cuidado: ${labels.name(o.cls)} delante, a ${steps} pasos.`;
-        else if (o.cls === 'door') msg = `Puerta delante, a ${steps} pasos.`;
+        else if (labels.is(o.cls, 'l')) msg = `${nm} delante, a ${steps} pasos.`;
         else {
           const side = this.freeSide(objects);
           if (side === 'izquierda' || side === 'derecha') msg += ` Mejor por la ${side}.`;

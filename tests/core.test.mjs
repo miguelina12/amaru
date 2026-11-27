@@ -131,9 +131,12 @@ test('grabar una ruta con un giro y recorrerla', () => {
 
 test('reconocer nombres de objetos', () => {
   assert.equal(classFromSpanish('una silla'), 'chair');
-  assert.equal(classFromSpanish('el sofá'), 'couch');
+  assert.equal(classFromSpanish('el sofá'), 'sofa');
   assert.equal(classFromSpanish('coche'), 'car');
   assert.equal(classFromSpanish('frigorífico'), 'refrigerator');
+  assert.equal(classFromSpanish('la puerta corrediza'), 'sliding door');
+  assert.equal(classFromSpanish('el inodoro'), 'toilet');
+  assert.equal(classFromSpanish('una paloma'), 'pigeon');
   assert.equal(classFromSpanish('puerta'), 'door');
   assert.equal(classFromSpanish('las escaleras'), 'stairs');
   assert.equal(classFromSpanish('ornitorrinco'), null);
@@ -280,4 +283,29 @@ test('filtro de sentido común', () => {
   assert.equal(implausible({ ...base, cls: 'bed', score: 0.6 }, 'outdoor'), 'no encaja en la calle');
   assert.equal(implausible({ ...base, cls: 'chair', est: { byH: 1, byW: 4 } }), 'proporciones imposibles');
   assert.equal(implausible({ ...base, cls: 'person', est: { ground: 3 }, realH: 0.3 }), 'tamaño imposible');
+});
+
+import { merge } from '../js/detector.js';
+import { group } from '../js/labels.js';
+
+test('el especialista de casa manda cuando los dos ven lo mismo', () => {
+  const general = [{ class: 'wooden door', score: 0.6, bbox: [0, 0, 100, 200] }, { class: 'dog', score: 0.8, bbox: [300, 300, 50, 50] }];
+  const casa = [{ class: 'door', score: 0.5, bbox: [5, 5, 100, 200] }];
+  const out = merge(general, casa, group);
+  assert.equal(out.length, 2);
+  assert.equal(out.find((d) => group(d.class) === 'puerta').source, 'casa');
+});
+
+test('sentido común con animales: "gato o perro", no "mapache"', () => {
+  // puntuaciones reales del detector en la foto de un samoyedo
+  const names = ['cat', 'raccoon', 'dog', 'person'];
+  const N = 1, out = new Float32Array((4 + names.length) * N);
+  out.set([100, 100, 80, 80], 0);
+  out[4] = 0.66; out[5] = 0.51; out[6] = 0.33; out[7] = 0.01;
+  const wanted = new Map(names.map((n, i) => [i, n]));
+  const prior = Float32Array.from(names, (n) => (n === 'raccoon' ? 0.6 : 1));
+  const groupIdx = [0, 1, 2, 3];
+  const [d] = decode(out, names.length, N, wanted, 0.3, { scale: 1, dx: 0, dy: 0 }, groupIdx, prior);
+  assert.equal(d.class, 'cat');
+  assert.equal(d.alt, 'dog');
 });

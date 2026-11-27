@@ -4,19 +4,17 @@
 
 import * as labels from './labels.js';
 
-// Puntuación mínima por clase (las que el modelo confunde más piden más seguridad).
+// Puntuación mínima por concepto (los que el modelo confunde más piden más seguridad).
 const MIN_SCORE = {
-  person: 0.5, door: 0.5, stairs: 0.45,
-  box: 0.6, column: 0.6, cabinet: 0.6, shelf: 0.6, fence: 0.55, window: 0.6, pole: 0.55,
-  'trash can': 0.55, 'traffic cone': 0.55, 'door handle': 0.55, 'light switch': 0.55,
+  persona: 0.5, puerta: 0.45, escaleras: 0.45,
+  caja: 0.55, columna: 0.55, armario: 0.5, 'estantería': 0.5, valla: 0.55, ventana: 0.5, poste: 0.55,
+  'cubo de basura': 0.5, cono: 0.55, 'pomo de la puerta': 0.55, 'interruptor de la luz': 0.55, enchufe: 0.6,
+  alfombra: 0.6, charco: 0.6, agujero: 0.5, bordillo: 0.5, juguete: 0.6, zapato: 0.6,
+  'araña': 0.6, mosca: 0.65, hormiga: 0.65, mosquito: 0.65, gusano: 0.65, cucaracha: 0.6,
 };
-const DEFAULT_MIN = 0.45;
+const DEFAULT_MIN = 0.4;
 
-const OUTDOOR_ONLY = new Set(['car', 'bus', 'truck', 'van', 'motorcycle', 'train', 'crosswalk', 'traffic light', 'street lamp', 'traffic cone', 'fire hydrant', 'parking meter']);
-const INDOOR_ONLY = new Set(['bed', 'sofa', 'couch', 'toilet', 'bathtub', 'washing machine', 'refrigerator', 'oven', 'sink', 'light switch']);
-const MOVABLE = new Set(['person', 'dog', 'cat', 'horse', 'car', 'bus', 'truck', 'van', 'motorcycle', 'bicycle', 'scooter', 'train', 'stroller', 'wheelchair', 'shopping cart']);
-
-export const canMove = (cls) => MOVABLE.has(cls);
+export const canMove = (cls) => labels.is(cls, 'm') || ['person', 'dog', 'cat', 'horse', 'car', 'bus', 'truck', 'motorcycle', 'bicycle', 'train'].includes(cls);
 
 /**
  * o: objeto enriquecido por vision.enrich (con est: {byH, byW, ground}, pxW, pxH, clipped).
@@ -24,10 +22,11 @@ export const canMove = (cls) => MOVABLE.has(cls);
  * Devuelve null si es aceptable, o el motivo del descarte.
  */
 export function implausible(o, scene = 'unknown') {
-  const min = MIN_SCORE[o.cls] ?? DEFAULT_MIN;
+  const g = labels.group(o.cls);
+  const min = MIN_SCORE[g] ?? DEFAULT_MIN;
   if (o.score < min) return 'poca seguridad';
-  if (scene === 'indoor' && OUTDOOR_ONLY.has(o.cls) && o.score < 0.8) return 'no encaja dentro de casa';
-  if (scene === 'outdoor' && INDOOR_ONLY.has(o.cls) && o.score < 0.8) return 'no encaja en la calle';
+  if (scene === 'indoor' && labels.is(o.cls, 'x') && o.score < 0.8) return 'no encaja dentro de casa';
+  if (scene === 'outdoor' && labels.is(o.cls, 'i') && o.score < 0.8) return 'no encaja en la calle';
 
   const e = o.est || {};
   // El alto y el ancho deben dar distancias parecidas si el objeto es lo que dice ser.
@@ -41,7 +40,7 @@ export function implausible(o, scene = 'unknown') {
     if (o.realH > inf.h * 2.2 || o.realH < inf.h / 2.5) return 'tamaño imposible';
   }
   // Una persona de pie o sentada no es mucho más ancha que alta.
-  if (o.cls === 'person' && o.pxH && o.pxW && !o.clipped?.top && !o.clipped?.bottom && o.pxH / o.pxW < 0.8) {
+  if (g === 'persona' && o.pxH && o.pxW && !o.clipped?.top && !o.clipped?.bottom && o.pxH / o.pxW < 0.8) {
     return 'forma no humana';
   }
   return null;
