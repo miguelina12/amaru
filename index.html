@@ -27,7 +27,7 @@
     <h1>Faro</h1>
     <p class="tag">Tu guía por voz. Ve por ti con la cámara, cuenta tus pasos y te orienta en casa y en la calle.</p>
     <button id="startBtn" class="primary">Toca para empezar</button>
-    <p class="fine">Funciona dentro del teléfono, sin enviar nada. Es una ayuda: no sustituye al bastón ni al perro guía.</p>
+    <p class="fine">Casi todo funciona dentro del teléfono. Las frases que no entiende y las fotos que pidas mirar con detalle pasan por el servidor de Faro (se puede apagar en Ajustes). Es una ayuda: no sustituye al bastón ni al perro guía.</p>
   </main>
 
   <!-- App -->
@@ -90,9 +90,15 @@
         <button class="act" data-cmd="calibra mis pasos">Calibrar pasos</button>
         <button class="act" data-cmd="descarga el mapa">Descargar mapa</button>
         <button class="act" id="tglCam" aria-pressed="false">Ver cámara</button>
+        <button class="act" id="tglServer" aria-pressed="true">Servidor de Faro</button>
         <button class="act" id="tglBrain" aria-pressed="false">Modo inteligente</button>
         <button class="act" data-cmd="ayuda">Ayuda</button>
       </div>
+      <p class="note" id="serverNote">Servidor de Faro: cuando Faro no entiende una frase, la envía a un ordenador de quien mantiene la app,
+        donde la interpreta un modelo abierto (Gemma 3), junto con el contexto que necesita: nombres de tus lugares y rutas,
+        lo que ve la cámara y la calle en la que estás si se sabe. Si dices "mira bien" o "léeme el cartel", también envía una foto de la cámara.
+        Todo viaja cifrado a través de Cloudflare y el servidor no lo guarda. Sin internet, o si el servidor no responde,
+        Faro sigue con lo que hay en el teléfono. Puedes apagarlo con el botón "Servidor de Faro".</p>
       <form id="typeForm">
         <label for="typeIn" class="sr">Escribe una orden</label>
         <input id="typeIn" autocomplete="off" enterkeyhint="send" placeholder="Escribe: llévame a la cocina">

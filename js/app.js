@@ -9,6 +9,7 @@ import { Vision } from './vision.js';
 import { Safety } from './safety.js';
 import { parse, parseBest, INTENT_DESC, findBest, cleanName, hasWake, stripWake, normalize } from './intents.js';
 import { Brain } from './brain.js';
+import { BrainServer, serverProblem, PRIVACY_NOTE } from './server.js';
 import * as geo from './geo.js';
 import * as labels from './labels.js';
 import { MapData, MapGuide, download as downloadMap, saveMap, loadMap, withArticle as withArt } from './map.js';
@@ -25,6 +26,7 @@ const gps = new Gps();
 const vision = new Vision($('video'), () => compass.pitch);
 const sonar = new audio.Sonar();
 const brain = new Brain();
+const server = new BrainServer(() => S.server !== false);
 
 const app = {
   nav: null, // StepGuide | GpsGuide
@@ -122,6 +124,8 @@ async function start() {
   else tips.push('No he podido abrir la cámara; te guío con pasos y GPS, pero sin avisos de obstáculos.');
   if (!okMotion || !okOrient) tips.push('No tengo permiso para los sensores de movimiento.');
   if (!S.calibrated) tips.push('Cuando quieras, di: calibra mis pasos.');
+  // Aviso de privacidad la primera vez (también está siempre visible en Ajustes)
+  if (S.server !== false && !S.serverNoticed) { tips.push(PRIVACY_NOTE); S.serverNoticed = true; store.save(); }
   say(tips.join(' '));
   if (!listener.supported) say('Este navegador no reconoce la voz. Usa los botones o escribe.');
 
@@ -254,6 +258,7 @@ $('tglSonar').addEventListener('click', () => handle(S.sonar ? 'desactiva el só
 $('tglHands').addEventListener('click', () => { openSettings(false); handle(S.handsFree ? 'desactiva manos libres' : 'activa manos libres'); });
 $('tglTorch').addEventListener('click', () => handle(vision.torchOn ? 'apaga la linterna' : 'enciende la linterna').then(updateInfo));
 $('checksBox').addEventListener('toggle', updateInfo);
+$('tglServer').addEventListener('click', () => { openSettings(false); handle(S.server !== false ? 'desactiva el servidor' : 'activa el servidor'); });
 $('tglBrain').addEventListener('click', () => { openSettings(false); handle(brain.ready || S.brain ? 'desactiva el modo inteligente' : 'activa el modo inteligente'); });
 $('tglCam').addEventListener('click', () => { $('camwrap').classList.toggle('off'); updateInfo(); });
 $('typeForm').addEventListener('submit', (e) => {
@@ -311,6 +316,18 @@ async function handsFreeLoop() {
   }
 }
 
+/** Foto actual de la cámara en JPEG (base64), como mucho 1024 px de lado. */
+function snapshot() {
+  const v = vision.video;
+  if (!v || v.readyState < 2 || !v.videoWidth) return null;
+  const k = Math.min(1, 1024 / Math.max(v.videoWidth, v.videoHeight));
+  const c = document.createElement('canvas');
+  c.width = Math.round(v.videoWidth * k);
+  c.height = Math.round(v.videoHeight * k);
+  c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', 0.8).split(',')[1];
+}
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ------------------------------------------------------------------ cerebro: interpretar órdenes
@@ -325,6 +342,8 @@ function brainState() {
     rumbo: compass.heading != null ? geo.cardinal(compass.heading) : null,
     gps: gps.last ? Math.round(gps.last.acc) + ' m de precisión' : 'sin señal',
     pasos: ped.count,
+    calle: (() => { const p = gps.last; const st = p && app.map?.covers(p) ? app.map.streetAt(p) : null; return st?.name || null; })(),
+    hora: new Date().toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' }),
   };
 }
 
@@ -339,6 +358,23 @@ async function handle(raw) {
     const a = app.awaiting;
     app.awaiting = null;
     return a.resolve(cmd, raw);
+  }
+
+  // Servidor de Faro (por internet, sin claves): para lo que las reglas no entienden.
+  // Tarda unos segundos (corre en un portátil sin GPU), así que no se usa para lo que ya se entiende aquí.
+  // Si no responde, seguimos abajo con lo que hay en el teléfono.
+  if (cmd.intent === 'unknown' && server.usable) {
+    say('Déjame pensar.', { priority: 'low', remember: false });
+    try {
+      const r = await server.interpret(raw, brainState());
+      if (r.intent === 'look') return handlers.look({ text: normalize(raw), question: raw });
+      if (r.say) say(r.say);
+      if (r.intent === 'none') return;
+      if (['navigate', 'find', 'where_is', 'save_place', 'record_route'].includes(r.intent) && !r.name) return;
+      return run({ ...r, name: r.name && cleanName(r.name), text: normalize(raw) });
+    } catch (e) {
+      if (!app.serverSaid || e.code === 'limit') { app.serverSaid = true; say(serverProblem(e.code), { priority: 'low' }); }
+    }
   }
 
   // No lo entiendo y el teléfono puede con el modo inteligente: lo ofrezco (una vez por sesión)
@@ -654,6 +690,26 @@ const handlers = {
     say('Veo ' + joinY(parts) + '.');
   },
 
+  /** Descripción detallada con el servidor de Faro: lee carteles, colores, por dónde pasar… */
+  async look(cmd = {}) {
+    if (!vision.stream) return say('La cámara está apagada.');
+    if (!server.usable) { if (S.server === false) say(serverProblem('off')); return handlers.describe(); }
+    const img = snapshot();
+    if (!img) return say('Todavía no tengo imagen de la cámara. Espera un momento.');
+    say('Mirando con detalle. Tarda un poco; quédate quieto.', { priority: 'low', remember: false });
+    try {
+      const st = brainState();
+      const text = await server.look(img, cmd.question || '', { calle: st.calle, rumbo: st.rumbo });
+      say(text || 'No he podido describir la imagen.');
+    } catch (e) {
+      say(serverProblem(e.code));
+      return handlers.describe();
+    }
+  },
+
+  server_on() { S.server = true; store.save(); server.downUntil = 0; say(PRIVACY_NOTE.replace(/ Puedes desactivarlo en Ajustes\.$/, '')); updateInfo(); },
+  server_off() { S.server = false; store.save(); server.history = []; say('Servidor desactivado. Todo se queda en el teléfono.'); updateInfo(); },
+
   find(cmd) {
     const cls = labels.classFromSpanish(cmd.name);
     if (!cls) {
@@ -896,6 +952,7 @@ function updateInfo() {
   set('tglHands', S.handsFree);
   set('tglTorch', vision.torchOn);
   set('tglBrain', brain.ready || brain.loading);
+  set('tglServer', S.server !== false);
   set('tglCam', !$('camwrap')?.classList.contains('off'));
 
   const ul = $('checks');
@@ -910,6 +967,8 @@ function updateInfo() {
     [gpsOk ? 'ok' : 'meh', 'GPS', gpsOk ? `precisión ±${Math.round(p.acc)} m` : 'buscando señal (en casa es normal)'],
     [compass.heading != null ? 'ok' : 'no', 'Brújula', compass.heading != null ? 'sí' : 'no da datos'],
     [app.motionOk !== false ? 'ok' : 'no', 'Contador de pasos', app.motionOk !== false ? 'sí' : 'sin permiso de movimiento'],
+    [S.server === false ? 'no' : server.usable ? 'ok' : 'meh', 'Servidor de Faro (por internet)',
+      S.server === false ? 'desactivado: todo se queda en el teléfono' : server.usable ? 'activo; tus frases pasan por él' : 'no responde ahora; uso lo del teléfono'],
     [brain.ready ? 'ok' : Brain.supported ? 'meh' : 'no', 'Modo inteligente',
       brain.ready ? `activo (${brain.model.split('-q4')[0]})` : brain.loading ? 'descargando…' : Brain.supported ? 'apagado; actívalo en Ajustes' : 'este navegador no tiene WebGPU'],
     [app.map ? 'ok' : 'meh', 'Mapa de calles', app.map ? 'descargado' : 'no; di "descarga el mapa"'],

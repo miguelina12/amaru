@@ -12,6 +12,8 @@ const DEFAULTS = {
     heightCm: null,
     sonar: false,
     brain: false,
+    server: true, // servidor de Faro por internet (se puede apagar en Ajustes)
+    serverNoticed: false, // ya se ha leído el aviso de privacidad
     handsFree: false,
     sensitivity: 1,
   },

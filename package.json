@@ -1,12 +1,13 @@
 {
   "name": "faro",
   "version": "1.0.0",
-  "description": "Guía por voz para personas ciegas: cámara, pasos y GPS, todo en el teléfono, sin APIs.",
+  "description": "Guía por voz para personas ciegas: cámara, pasos y GPS en el teléfono, con un servidor propio opcional (sin claves) para entender frases libres y mirar con detalle.",
   "type": "module",
   "private": true,
   "scripts": {
     "test": "node --test tests/*.test.mjs",
-    "start": "python3 -m http.server 8080"
+    "start": "python3 -m http.server 8080",
+    "server": "node server/faro-server.mjs"
   },
   "license": "MIT"
 }

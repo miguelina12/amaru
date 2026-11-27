@@ -4,8 +4,10 @@ Faro es una app web instalable (PWA) que te guía por casa y por la calle usando
 **la cámara, el GPS, la brújula y el contador de pasos del teléfono**. Te habla con
 la mejor voz en español que tenga tu móvil y entiende órdenes dichas con naturalidad.
 
-**Regla del proyecto: sin APIs.** No se envían imágenes, audio ni ubicación a ningún
-servidor. Todo se calcula dentro del teléfono:
+**Regla del proyecto: sin APIs de pago ni claves.** Casi todo se calcula dentro del teléfono. La única
+excepción es el [servidor de Faro](#servidor-de-faro-por-internet) (se puede apagar en Ajustes): las frases que
+el teléfono no entiende y las fotos que pidas mirar con detalle pasan por un ordenador de quien mantiene la app.
+Nunca se envía audio ni la posición GPS.
 
 | Función | Cómo funciona (en el teléfono) |
 |---|---|
@@ -84,10 +86,41 @@ Qwen3‑1.7B (~1 GB) en el resto. Entiende frases libres ("tengo hambre, ¿me ll
 lo último que hablasteis y conversa. Si Faro no te entiende, te ofrece activarlo.
 Necesita un móvil reciente con WebGPU (Chrome en Android reciente).
 
+## Servidor de Faro (por internet)
+
+Sin claves ni cuentas: un ordenador de quien mantiene Faro ejecuta un modelo abierto con visión
+(**Gemma 3 4B** en [Ollama](https://ollama.com)) y lo publica con un túnel de Cloudflare.
+
+- **Cuándo se usa:** solo cuando las reglas del teléfono no entienden una frase, y para "mira bien",
+  "léeme el cartel" o "de qué color es". Las órdenes normales no salen del teléfono.
+- **Qué se envía:** la frase (texto, nunca audio), los nombres de tus lugares y rutas, lo que ve la cámara,
+  la calle y la hora; con "mira bien", una foto JPEG. Nunca la posición GPS. El servidor no guarda nada:
+  solo cuenta peticiones en memoria para el límite de uso.
+- **Si no responde** (sin internet, ordenador apagado, ocupado o límite alcanzado), Faro lo dice y sigue con
+  lo que hay en el teléfono. Durante un minuto no lo vuelve a intentar, para no hacerte esperar.
+- **Apagarlo:** botón "Servidor de Faro" en Ajustes, o di "desactiva el servidor".
+- **Velocidad:** corre en un portátil sin GPU. Entender una frase tarda unos 10–20 s y describir una foto
+  alrededor de un minuto, y atiende a una persona cada vez.
+
+### Montar el servidor (para quien mantiene Faro)
+
+Necesita Windows con [Ollama](https://ollama.com), Node 18+ y `cloudflared`.
+
+```powershell
+ollama pull gemma3:4b
+powershell -ExecutionPolicy Bypass -File server\arrancar.ps1
+```
+
+`arrancar.ps1` arranca `server/faro-server.mjs` (solo en `127.0.0.1:8787`), abre un túnel rápido de
+Cloudflare (`https://….trycloudflare.com`), escribe esa dirección en `server.json` y la sube a la rama, de
+donde la lee la app. Ollama nunca se expone: el servidor solo acepta `POST /v1/interpret` y `POST /v1/look`
+desde el origen de la app, con un **límite por persona** (por IP: 8 frases/min y 300/día; 2 fotos/min y
+60/día) y una cola corta (si está llena responde "ocupado").
+
 ## Límites (dicho con honestidad)
 
-- **No es tan listo como un modelo grande en la nube.** Sin APIs, el entendimiento es un analizador de
-  órdenes muy completo, más un modelo pequeño opcional. Funciona bien con órdenes del día a día y peor
+- **No es tan listo como un modelo grande en la nube.** El entendimiento es un analizador de
+  órdenes muy completo, más un modelo pequeño opcional (en el teléfono o en el servidor de Faro). Funciona bien con órdenes del día a día y peor
   con conversación abierta.
 - **El mapa de calles se descarga una vez** de OpenStreetMap (servicio Overpass): es la única conexión externa,
   y envía la zona aproximada (2 km) que se descarga. Después las rutas se calculan sin internet. La calidad
