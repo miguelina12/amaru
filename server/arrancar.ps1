@@ -1,4 +1,4 @@
-# Arranca el cerebro de Faro en este ordenador y lo publica con un túnel rápido de Cloudflare.
+﻿# Arranca el cerebro de Faro en este ordenador y lo publica con un túnel rápido de Cloudflare.
 #   powershell -ExecutionPolicy Bypass -File server\arrancar.ps1
 # 1. Comprueba que Ollama esté en marcha y tenga el modelo.
 # 2. Arranca server\faro-server.mjs (solo en 127.0.0.1).
@@ -52,9 +52,10 @@ if ($old -ne $url) {
   $obj = [ordered]@{ url = $url; modelo = $model; actualizado = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') }
   [IO.File]::WriteAllText($json, ($obj | ConvertTo-Json) + "`n", (New-Object Text.UTF8Encoding $false))
   git -C $repo add server.json
-  git -C $repo commit -m "Nueva dirección del cerebro de Faro" --quiet
-  git -C $repo pull --rebase --quiet
+  git -C $repo commit -m "Nueva dirección del cerebro de Faro" --quiet -- server.json
+  git -C $repo pull --rebase --autostash --quiet
   git -C $repo push --quiet
+  if ($LASTEXITCODE -ne 0) { Write-Warning 'No se pudo subir server.json; la app no verá la dirección nueva hasta que lo subas.' }
   Write-Host 'Dirección subida a GitHub; la app la verá en 1-2 minutos (cuando GitHub Pages publique).'
 }
 
