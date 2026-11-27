@@ -194,6 +194,7 @@ details.more[open] summary::after { content: '▴'; }
 #camwrap.off { position: fixed; width: 2px; height: 2px; opacity: 0; pointer-events: none; left: 0; top: 0; }
 #camwrap video, #camwrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 
+.demo { margin: 0; text-align: center; color: var(--muted); font-size: 0.7rem; letter-spacing: 0.04em; }
 .note { margin: 12px 0; color: var(--muted); font-size: 1.02rem; line-height: 1.4; }
 form#typeForm { display: flex; gap: 10px; }
 #typeIn {
